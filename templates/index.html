@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Terminal 3.0 · BloFin 3m Bot</title>
+  <title>Terminal 3.0 · BloFin Multi-Timeframe Bot</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -11,64 +11,84 @@
   <header class="top">
     <div>
       <div class="eyebrow">TERMINAL 3.0 ENGINE · BLOFIN EXECUTION</div>
-      <h1>BTC 3-minute trading bot</h1>
-      <div class="sub">BTC-USDT perpetual · closed-candle entries · higher-timeframe confirmation</div>
+      <h1>BTC multi-timeframe trading bot</h1>
+      <div class="sub">Every native BloFin futures timeframe · independent signals · multi-position execution · closed-candle entries</div>
     </div>
-    <div class="mode {{ environment }}">{{ environment|upper }}</div>
+    <div class="top-actions"><div class="mode {{ environment }}">{{ environment|upper }}</div><div class="version">v{{ version }}</div></div>
   </header>
 
   <section class="hero-grid">
-    <div class="card hero-price"><div class="k">BTC price</div><div class="big" id="price">—</div><div class="sub" id="spread">Waiting for BloFin…</div></div>
+    <div class="card"><div class="k">BTC price</div><div class="big" id="price">—</div><div class="sub" id="spread">Waiting for BloFin…</div></div>
     <div class="card"><div class="k">Bot</div><div class="v" id="armed">STOPPED</div><div class="sub" id="message">Starting…</div></div>
-    <div class="card"><div class="k">3m decision</div><div class="v" id="decision">—</div><div class="sub" id="decisionReason">No scan yet</div></div>
-    <div class="card"><div class="k">Equity</div><div class="v" id="equity">—</div><div class="sub" id="daily">—</div></div>
+    <div class="card"><div class="k">All-timeframe bias</div><div class="v" id="bias">—</div><div class="sub" id="horizonLine">—</div></div>
+    <div class="card"><div class="k">Positions / equity</div><div class="v"><span id="posCount">0</span> / <span id="posCap">10</span></div><div class="sub"><span id="equity">—</span> · open planned risk <span id="openRisk">—</span></div></div>
   </section>
 
   <section class="controls card">
     <div class="arm-row">
       <input id="confirm" placeholder="Type LIVE only for real-money mode" autocomplete="off">
       <button id="arm" class="primary">ARM BOT</button>
-      <button id="stop">STOP NEW TRADES</button>
-      <button id="kill" class="danger">CLOSE BOT POSITION + STOP</button>
+      <button id="stop">PAUSE NEW ENTRIES</button>
+      <button id="kill" class="danger">CLOSE BOT POSITIONS + STOP</button>
+      <button id="multi">ENABLE MULTI-POSITION MODE</button>
       <button id="export">EXPORT TRADE LOG</button>
     </div>
-    <div class="warning" id="warning">Paper/demo mode is intended for validation before live use.</div>
+    <div class="warning" id="warning">No daily trade-count limit or cooldown. Exchange hard limit: 10 simultaneous positions per instrument.</div>
   </section>
 
-  <main class="grid">
-    <section class="card">
-      <div class="head"><h2>3m setup</h2><span id="scanTime">—</span></div>
-      <div class="score-row">
-        <div><div class="k">Score</div><div class="score" id="score">—</div></div>
-        <div><div class="k">Quality</div><div class="score small" id="quality">—</div></div>
-        <div><div class="k">Regime</div><div class="score small" id="regime">—</div></div>
+  <main class="layout">
+    <section class="card chart-card">
+      <div class="head">
+        <div><h2>Selected timeframe</h2><span id="chartLabel">1h · click any timeframe below</span></div>
+        <div class="chart-tools"><button id="zoomOut">−</button><span id="zoomLabel">120 candles</span><button id="zoomIn">+</button></div>
       </div>
-      <div class="metric-grid" id="signalMetrics"></div>
+      <canvas id="chart" width="1100" height="420" aria-label="BTC candlestick chart"></canvas>
+      <div class="chart-readout" id="chartReadout">Move over the chart for candle details.</div>
     </section>
 
-    <section class="card">
-      <div class="head"><h2>Higher-timeframe gate</h2><span>15m · 1h · 4h · 1d</span></div>
-      <div class="context-summary"><b id="contextScore">—</b><span id="contextAgreement">—</span></div>
-      <table><thead><tr><th>TF</th><th>Score</th><th>Setup</th><th>Regime</th></tr></thead><tbody id="contextRows"><tr><td colspan="4">Waiting…</td></tr></tbody></table>
-    </section>
-
-    <section class="card">
-      <div class="head"><h2>Risk engine</h2><span>hard limits</span></div>
-      <div class="metric-grid" id="riskGrid"></div>
-      <div class="note">Position size is calculated from stop distance and account equity, then capped by configured margin use. One BTC position at a time; no pyramiding.</div>
-    </section>
-
-    <section class="card">
-      <div class="head"><h2>Open position</h2><span id="owner">—</span></div>
-      <div id="position" class="position-empty">No BTC position detected.</div>
+    <section class="card settings-card">
+      <div class="head"><h2>Live aggression controls</h2><span>new entries only</span></div>
+      <div class="setting-grid">
+        <label>Signal mode<select id="signalMode"><option>Conservative</option><option>Balanced</option><option selected>Aggressive</option></select></label>
+        <label>Risk / trade <span id="riskPctOut"></span><input id="riskPct" type="range" min="0.05" max="1.5" step="0.05"></label>
+        <label>Leverage <span id="leverageOut"></span><input id="leverage" type="range" min="1" max="8" step="0.5"></label>
+        <label>Min quality <span id="qualityOut"></span><input id="minQuality" type="range" min="35" max="75" step="1"></label>
+        <label>Min confluence <span id="confluenceOut"></span><input id="minConfluence" type="range" min="25" max="75" step="1"></label>
+        <label>Portfolio risk cap <span id="portfolioOut"></span><input id="portfolioRisk" type="range" min="1" max="12" step="0.5"></label>
+        <label>Base target <span id="targetOut"></span><input id="targetR" type="range" min="1" max="4" step="0.1"></label>
+      </div>
+      <button id="applySettings" class="primary wide">APPLY SETTINGS</button>
+      <div class="note">These controls change future entries only. The bot still uses hard spread, daily-loss, exchange-position and stop-loss protections.</div>
     </section>
   </main>
 
-  <section class="card footer-card">
-    <div class="k">How this bot trades</div>
-    <p>It waits for a new <b>confirmed 3m Terminal 3.0 BUY/SELL marker</b>, then checks 15m/1h/4h/1d context, spread, stale-entry distance, risk guards and existing positions. Stop-loss and take-profit are attached to the BloFin market order. Live trading stays locked unless you enable it locally and then type LIVE before arming.</p>
+  <section class="card matrix-card">
+    <div class="head"><h2>All-timeframe market map</h2><span>click row to load chart · toggle AUTO to enable/disable trading</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>AUTO</th><th>TF</th><th>Score</th><th>Quality</th><th>Agreement</th><th>Setup</th><th>Regime</th><th>RSI</th><th>ADX</th><th>Coverage</th></tr></thead>
+      <tbody id="tfRows"><tr><td colspan="10">Loading…</td></tr></tbody>
+    </table></div>
   </section>
 
+  <section class="triple-grid">
+    <section class="card">
+      <div class="head"><h2>Fresh signal candidates</h2><span id="candidateCount">0</span></div>
+      <div id="candidates" class="stack empty">No fresh candidates.</div>
+    </section>
+    <section class="card">
+      <div class="head"><h2>Open positions</h2><span>independent BloFin positions</span></div>
+      <div id="positions" class="stack empty">No positions.</div>
+    </section>
+    <section class="card">
+      <div class="head"><h2>Activity stream</h2><span>latest first</span></div>
+      <div id="events" class="event-list">Starting…</div>
+    </section>
+  </section>
+
+  <section class="card footer-card">
+    <div class="k">How v2 trades</div>
+    <p>Every native BloFin timeframe can independently create a confirmed BUY/SELL marker. The bot evaluates that setup against horizon-level and whole-market structure, then may open a separate position. There is no daily trade-count limit and no cooldown; duplicate execution of the same closed-candle signal is still prevented. BloFin itself caps Multi-Position mode at 10 positions per instrument.</p>
+  </section>
   <div id="error" class="error"></div>
 </div>
 <script src="/static/app.js"></script>
