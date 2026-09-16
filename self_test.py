@@ -7,6 +7,7 @@ from automation import ensure_multi_position,multi_position_enabled
 from blofin_client import BloFinClient,quantize_price,quantize_step
 from bot import Terminal3BloFinBot
 from config import BotConfig
+from reporting import REPORT_INTERVAL_SECONDS,summarize_window
 from risk import size_for_risk
 from strategy import NATIVE_TF_BARS,DERIVED_TFS,TF_ORDER,HORIZONS,aggregate_timeframe,evaluate_all
 
@@ -65,6 +66,26 @@ def test_automatic_multi_position():
     assert multi_position_enabled(mode) and live.margin_mode=='isolated'
     paper=FakeBot('paper');mode=ensure_multi_position(paper)
     assert multi_position_enabled(mode)
+
+
+def test_three_hour_reporting_math():
+    assert REPORT_INTERVAL_SECONDS==10800
+    trades=[
+        {'event':'OPEN','timeframe':'5m','pnl':''},
+        {'event':'OPEN','timeframe':'1h','pnl':''},
+        {'event':'CLOSE','timeframe':'5m','pnl':'12.5'},
+        {'event':'CLOSE','timeframe':'1h','pnl':'-5.0'},
+    ]
+    events=[
+        {'kind':'entry_rejected','reason':'spread too wide'},
+        {'kind':'entry_rejected','reason':'spread too wide'},
+        {'kind':'entry_rejected','reason':'portfolio risk cap'},
+    ]
+    x=summarize_window(trades,events)
+    assert x['opened']==2 and x['closed']==2 and x['wins']==1 and x['losses']==1
+    assert x['win_rate_pct']==50.0 and x['realized_pnl']==7.5 and x['profit_factor']==2.5
+    assert x['execution_rejections']==3 and x['top_rejection_reasons'][0]==('spread too wide',2)
+    assert x['by_timeframe']['5m']['pnl']==12.5 and x['by_timeframe']['1h']['pnl']==-5.0
 
 
 def test_signing_and_order_detail_route():
@@ -126,7 +147,7 @@ def test_multiple_paper_positions():
 
 
 def main():
-    test_fixed_profile();test_automatic_multi_position();test_signing_and_order_detail_route();test_constructed_candles();test_all_timeframes();test_risk();test_multiple_paper_positions()
-    print('SELF TEST OK: fixed profile, auto multi-position, signing, order-detail tracking, 30 timeframes, aggregation, multi-horizon TA, multi-position paper execution, sizing')
+    test_fixed_profile();test_automatic_multi_position();test_three_hour_reporting_math();test_signing_and_order_detail_route();test_constructed_candles();test_all_timeframes();test_risk();test_multiple_paper_positions()
+    print('SELF TEST OK: fixed profile, auto multi-position, 3-hour reporting, signing, order-detail tracking, 30 timeframes, aggregation, multi-horizon TA, multi-position paper execution, sizing')
 
 if __name__=='__main__':main()

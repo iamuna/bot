@@ -36,7 +36,12 @@
       <span><b>FIXED PROFILE:</b> Aggressive · 1.45% risk/trade · 7× leverage · quality 35% · confluence 25% · portfolio risk cap 11.5% · target 2.0R</span>
       <span id="multiStatus" class="auto-pill">MULTI-POSITION AUTO</span>
     </div>
-    <div class="warning" id="warning">No manual aggression controls. No daily trade-count limit or cooldown. Multi-position mode is enabled automatically when the bot is armed. Portfolio-risk and daily-loss circuit breakers remain active.</div>
+    <div class="status-strip">
+      <span><b>3-HOUR REPORT:</b> <span id="reportStatus">Starts when the bot is armed.</span></span>
+      <span id="reportMetrics">No report yet.</span>
+      <button id="downloadReport">DOWNLOAD LATEST REPORT</button>
+    </div>
+    <div class="warning" id="warning">No manual aggression controls. No daily trade-count limit or cooldown. Multi-position mode is enabled automatically when the bot is armed. A performance report is generated every 3 hours while armed. Portfolio-risk and daily-loss circuit breakers remain active.</div>
   </section>
 
   <main class="layout single">
@@ -77,8 +82,8 @@
   </section>
 
   <section class="card footer-card">
-    <div class="k">How v2.2 trades</div>
-    <p>The bot uses one built-in aggressive profile and does not expose manual aggression sliders. Every enabled timeframe can independently create a permanent BUY/SELL candidate after its candle closes. Multi-position mode is automatic: PAPER mode starts that way, while DEMO/LIVE checks BloFin and requests Hedge + Multi-Position mode when you arm the bot if needed. Fifteen intervals come directly from BloFin; the other fifteen are constructed from native OHLCV bars and cannot signal until the constructed candle is complete.</p>
+    <div class="k">How v2.3 trades</div>
+    <p>The bot uses one built-in aggressive profile and does not expose manual aggression sliders. Every enabled timeframe can independently create a permanent BUY/SELL candidate after its candle closes. Multi-position mode is automatic. While the bot is armed it also writes a performance report every three hours to <code>logs/reports/</code>, including trades opened/closed, wins/losses, realized P&amp;L, win rate, profit factor, timeframe performance, execution rejections, current equity, open risk and the all-timeframe market state.</p>
   </section>
   <div id="error" class="error"></div>
 </div>

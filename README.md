@@ -1,16 +1,35 @@
-# Terminal 3.0 · BloFin 30-Timeframe Bot v2.2
+# Terminal 3.0 · BloFin 30-Timeframe Bot v2.3
 
 A BTC-USDT perpetual trading bot built from the Terminal 3.0 TA engine. It evaluates **30 timeframes**, lets every enabled timeframe create its own closed-candle trade candidate, and supports multiple independent positions through BloFin Hedge + Multi-Position mode.
 
-## What changed in v2.2
+## What changed in v2.3
 
-The manual aggression panel and the manual **Enable Multi-Position Mode** button are gone.
+The bot now generates an **automatic performance report every 3 hours while armed**. The reporting window starts when you arm the bot. After each report, a new 3-hour window begins automatically.
 
-The bot now uses one predetermined built-in trading profile and automatically ensures Multi-Position mode when you arm it. PAPER mode is multi-position by default. DEMO/LIVE checks BloFin and requests Hedge + Multi-Position mode automatically if it is not already active. If BloFin refuses the account-mode change because positions/orders are open, the bot stops the arm request and shows the exchange error instead of silently falling back to single-position behavior.
+Reports are saved locally under:
+
+`logs/reports/`
+
+Each cycle creates both JSON and Markdown versions, plus continuously updated `latest.json` and `latest.md` files.
+
+Every report includes:
+
+- trades opened and closed in the 3-hour window;
+- wins, losses and win rate;
+- realized P&L and average closed-trade P&L;
+- gross profit, gross loss and profit factor;
+- performance broken down by timeframe;
+- execution rejection count and the most common rejection reasons;
+- current equity and the equity change across the report window;
+- current open positions and planned open risk;
+- current all-timeframe direction, score and Minutes/Hours/Days/Weeks/Months horizon readings;
+- current signal-candidate and strategy-rejection counts.
+
+The dashboard shows a countdown to the next report, a compact summary of the most recent report, and a button to download the latest Markdown report.
 
 ## Fixed trading profile
 
-These values are built into v2.2 and are not dashboard or `.env` aggression controls:
+The bot uses one predetermined built-in profile rather than manual aggression controls:
 
 - Signal mode: `Aggressive`
 - Risk per new position: `1.45%` of equity
@@ -70,20 +89,7 @@ BloFin currently documents a hard maximum of **10 positions per instrument** in 
 
 ## Dashboard
 
-The local UI includes:
-
-- live BTC price/spread and equity;
-- overall 30-timeframe bias;
-- one large selectable candlestick chart;
-- Minutes / Hours / Days / Weeks / Months filters;
-- per-timeframe AUTO switches;
-- score, quality, agreement, setup, regime, RSI, ADX and data coverage;
-- fixed-profile status instead of aggression sliders;
-- automatic Multi-Position status instead of an enable button;
-- fresh candidate feed;
-- multiple-position list;
-- activity/error stream;
-- trade CSV export.
+The local UI includes live BTC price/spread and equity, overall 30-timeframe bias, one large selectable candlestick chart, Minutes / Hours / Days / Weeks / Months filters, per-timeframe AUTO switches, score/quality/agreement/setup/regime/RSI/ADX/data coverage, fixed-profile status, automatic Multi-Position status, 3-hour report countdown and summary, fresh candidate feed, multiple-position list, activity/error stream and trade/report exports.
 
 ## Modes
 
@@ -114,7 +120,7 @@ Do not commit or share `.env`.
 
 ## Security
 
-Use a dedicated BloFin API key with **READ + TRADE only**. Do not grant TRANSFER permission. `.env`, logs, caches and local state are ignored by git.
+Use a dedicated BloFin API key with **READ + TRADE only**. Do not grant TRANSFER permission. `.env`, logs, caches, reports and local state are ignored by git.
 
 ## Tests
 
