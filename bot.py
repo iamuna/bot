@@ -27,7 +27,7 @@ class Terminal3BloFinBot:
         self.lock=threading.RLock();self.running=False;self.armed=False;self.thread=None
         self.last_error='';self.last_message='Bot initialized; not armed.';self.last_scan_at='';self.last_ticker=None
         self.instrument=None;self.margin_mode='isolated';self.position_mode={'positionMode':'net_mode','multiPosition':'false'}
-        self.positions=[];self.bot_owned:dict[str,dict[str,Any]]={};self.paper_positions:list[dict[str,Any]]=[]
+        self.positions=[];self.bot_owned:dict[str,dict[str,Any]]={};self.unresolved_orders:dict[str,dict[str,Any]]={};self.paper_positions:list[dict[str,Any]]=[]
         self.paper_equity=float(cfg.paper_equity);self.cached_equity=self.paper_equity if cfg.environment=='paper' else None
         self.day_key='';self.day_start_equity=self.paper_equity;self.day_realized=0.;self.kill_reason=''
         self.cache:dict[str,list[dict[str,Any]]]={tf:[] for tf in TF_ORDER};self.last_closed_t:dict[str,int]={}
@@ -38,7 +38,7 @@ class Terminal3BloFinBot:
             'min_quality':cfg.min_quality,'min_confluence':cfg.min_confluence,'tp_r_multiple':cfg.tp_r_multiple,
             'enabled_timeframes':set(TF_ORDER),
         }
-        self._next_tf_refresh={tf:0.0 for tf in TF_ORDER};self._ensure_log()
+        self._next_tf_refresh={tf:0.0 for tf in NATIVE_TF_BARS};self._ensure_log()
 
     def _ensure_log(self):
         if not TRADE_LOG.exists():
@@ -78,7 +78,7 @@ class Terminal3BloFinBot:
     def arm(self,confirmation=''):
         with self.lock:
             if self.cfg.environment=='live' and confirmation!='LIVE':raise ValueError('Type LIVE in the dashboard to arm real-money mode')
-            self._init_exchange();self._bootstrap_market();self.armed=True;self.kill_reason='';self.last_message=f'ARMED in {self.cfg.environment.upper()} mode · all-timeframe engine active';self._event('armed')
+            self._init_exchange();self._bootstrap_market();self.armed=True;self.kill_reason='';self.last_message=f'ARMED in {self.cfg.environment.upper()} mode · 30-timeframe engine active';self._event('armed')
     def disarm(self,reason='User stopped new entries'):
         self.armed=False;self.last_message=reason;self._event('disarmed',reason=reason)
 
@@ -88,19 +88,47 @@ class Terminal3BloFinBot:
             if self.cfg.environment=='paper':
                 for p in list(self.paper_positions):self._paper_close(p,'manual stop')
             else:
-                self._refresh_private();live_by_id={str(p.get('positionId') or ''):p for p in self.positions}
+                self._refresh_private();self._resolve_unresolved_orders()
+                live_by_id={str(p.get('positionId') or ''):p for p in self.positions}
                 for pid,meta in list(self.bot_owned.items()):
                     p=live_by_id.get(pid)
                     if not p:continue
                     try:self.client.close_position(self.cfg.instrument,self.margin_mode,str(p.get('positionSide') or meta.get('positionSide') or 'long'),pid)
                     except Exception as e:errors.append(f'{pid}: {e}')
                 self._refresh_private()
-            self.last_message='Bot stopped; close requests sent for bot-owned positions.' if not errors else 'Bot stopped; some close requests failed.'
+                if self.unresolved_orders:errors.append(f'{len(self.unresolved_orders)} recent order(s) still awaiting positionId reconciliation')
+            self.last_message='Bot stopped; close requests sent for bot-owned positions.' if not errors else 'Bot stopped; some position tracking/close actions need attention.'
         except Exception as e:errors.append(str(e))
         if errors:self.last_error='; '.join(errors)
 
+    def _resolve_unresolved_orders(self):
+        if self.cfg.environment=='paper' or not self.unresolved_orders:return
+        live={str(p.get('positionId') or ''):p for p in self.positions if abs(f(p.get('positions')))>0 and p.get('positionId')}
+        for oid,meta in list(self.unresolved_orders.items()):
+            pid='';detail={}
+            try:
+                detail=self.client.get_order_detail(self.cfg.instrument,order_id=oid)
+                pid=str(detail.get('positionId') or '')
+            except Exception:pass
+            if not pid:
+                before=set(meta.get('before_ids') or [])
+                ps=str(meta.get('positionSide') or '')
+                fresh=[p for x,p in live.items() if x not in before and x not in self.bot_owned and str(p.get('positionSide') or '')==ps]
+                if fresh:pid=str(max(fresh,key=lambda p:f(p.get('createTime') or p.get('cTime'))).get('positionId') or '')
+            if pid:
+                clean=dict(meta);clean.pop('before_ids',None);self.bot_owned[pid]=clean;self.unresolved_orders.pop(oid,None);self._event('position_tracking_resolved',order_id=oid,position_id=pid,timeframe=meta.get('timeframe'))
+                continue
+            state=str(detail.get('state') or detail.get('orderState') or '').lower()
+            if state in {'canceled','cancelled','rejected','failed','partially_canceled','partially_cancelled'}:
+                self.unresolved_orders.pop(oid,None);self._event('order_tracking_released',order_id=oid,state=state,timeframe=meta.get('timeframe'))
+
     def _refresh_private(self):
         self.positions=self.client.get_positions(self.cfg.instrument)
+        self._resolve_unresolved_orders()
+        live_ids={str(p.get('positionId') or '') for p in self.positions if abs(f(p.get('positions')))>0 and p.get('positionId')}
+        for pid,meta in list(self.bot_owned.items()):
+            if pid and pid not in live_ids:
+                self.bot_owned.pop(pid,None);self._event('position_tracking_closed',position_id=pid,timeframe=meta.get('timeframe'))
         bal=self.client.get_balance();details=bal.get('details') or [];eq=f(bal.get('totalEquity'))
         if not eq and details:eq=f(details[0].get('equity') or details[0].get('available'))
         if eq>0:self.cached_equity=eq
@@ -172,10 +200,10 @@ class Terminal3BloFinBot:
 
     def _open_risk_usd(self):
         if self.cfg.environment=='paper':return sum(f(p.get('risk_usd')) for p in self.paper_positions)
-        return sum(f(meta.get('risk_usd')) for meta in self.bot_owned.values())
+        return sum(f(meta.get('risk_usd')) for meta in self.bot_owned.values())+sum(f(meta.get('risk_usd')) for meta in self.unresolved_orders.values())
     def _position_count(self):
         if self.cfg.environment=='paper':return len(self.paper_positions)
-        return len([p for p in self.positions if abs(f(p.get('positions'))) > 0])
+        actual=len([p for p in self.positions if abs(f(p.get('positions'))) > 0]);return actual+len(self.unresolved_orders)
 
     def _execute(self,c:Candidate,ticker,equity):
         live=f(ticker.get('last'));bid=f(ticker.get('bidPrice'));ask=f(ticker.get('askPrice'))
@@ -204,13 +232,24 @@ class Terminal3BloFinBot:
             ps='long' if c.action=='BUY' else 'short';before={str(p.get('positionId') or '') for p in self.positions if p.get('positionId')}
             self.client.set_leverage(self.cfg.instrument,self.runtime['leverage'],self.margin_mode,ps)
             o=self.client.place_market_order(self.cfg.instrument,self.margin_mode,ps,'buy' if c.action=='BUY' else 'sell',plan.contracts,sl_price=stop_s,tp_price=target_s)
-            oid=str(o.get('orderId',''));pid=str(o.get('positionId') or '')
-            time.sleep(.7);self._refresh_private()
-            if not pid:
-                fresh=[p for p in self.positions if str(p.get('positionId') or '') not in before and str(p.get('positionSide') or '')==ps]
-                if fresh:pid=str(max(fresh,key=lambda p:f(p.get('createTime'))).get('positionId') or '')
-            if pid:self.bot_owned[pid]={'timeframe':c.timeframe,'positionSide':ps,'entry':live,'stop':float(stop_s),'target':float(target_s),'risk_usd':plan.risk_usd,'quality':c.quality,'confluence':c.confluence,'order_id':oid}
-            else:self._event('position_tracking_warning',order_id=oid,timeframe=c.timeframe,reason='order filled but positionId not resolved yet')
+            oid=str(o.get('orderId') or '');pid=str(o.get('positionId') or '')
+            meta={'timeframe':c.timeframe,'positionSide':ps,'entry':live,'stop':float(stop_s),'target':float(target_s),'risk_usd':plan.risk_usd,'quality':c.quality,'confluence':c.confluence,'order_id':oid,'before_ids':list(before)}
+            for _ in range(5):
+                if pid:break
+                time.sleep(.35)
+                try:
+                    detail=self.client.get_order_detail(self.cfg.instrument,order_id=oid) if oid else {}
+                    pid=str(detail.get('positionId') or '')
+                except Exception:pass
+                try:self.positions=self.client.get_positions(self.cfg.instrument)
+                except Exception:pass
+                if not pid:
+                    fresh=[p for p in self.positions if str(p.get('positionId') or '') not in before and str(p.get('positionSide') or '')==ps]
+                    if fresh:pid=str(max(fresh,key=lambda p:f(p.get('createTime') or p.get('cTime'))).get('positionId') or '')
+            if pid:
+                meta.pop('before_ids',None);self.bot_owned[pid]=meta
+            else:
+                key=oid or f'UNRESOLVED-{int(time.time()*1000)}';self.unresolved_orders[key]=meta;self._event('position_tracking_pending',order_id=key,timeframe=c.timeframe,reason='market order accepted; awaiting independent positionId')
         self.last_processed.add(sigkey);self.last_message=f'{c.action} {c.timeframe} opened · {plan.contracts} contracts · risk ≈ ${plan.risk_usd:.2f}'
         self._trade('OPEN',position_id=pid,timeframe=c.timeframe,side=c.action,entry=round(live,2),contracts=plan.contracts,stop=stop_s,target=target_s,quality=c.quality,confluence=c.confluence,reason=c.reason,order_id=oid)
         self._event('position_opened',position_id=pid,timeframe=c.timeframe,side=c.action,quality=c.quality,confluence=c.confluence,risk_usd=plan.risk_usd)
@@ -288,8 +327,7 @@ class Terminal3BloFinBot:
             time.sleep(max(.5,self.cfg.loop_seconds))
 
     def _position_view(self):
-        out=[]
-        src=self.paper_positions if self.cfg.environment=='paper' else self.positions
+        out=[];src=self.paper_positions if self.cfg.environment=='paper' else self.positions
         for p in src:
             if abs(f(p.get('positions')))<=0:continue
             pid=str(p.get('positionId') or '');meta=self.bot_owned.get(pid,{})
@@ -302,10 +340,10 @@ class Terminal3BloFinBot:
             'time':iso_now(),'running':self.running,'armed':self.armed,'environment':self.cfg.environment,'instrument':self.cfg.instrument,
             'price':f(t.get('last')) or None,'bid':f(t.get('bidPrice')) or None,'ask':f(t.get('askPrice')) or None,'equity':eq,
             'day_start_equity':self.day_start_equity,'day_realized':round(self.day_realized,4),'margin_mode':self.margin_mode,'position_mode':self.position_mode,
-            'positions':self._position_view(),'open_position_count':self._position_count(),'exchange_position_cap':EXCHANGE_MAX_POSITIONS,
+            'positions':self._position_view(),'open_position_count':self._position_count(),'exchange_position_cap':EXCHANGE_MAX_POSITIONS,'unresolved_order_count':len(self.unresolved_orders),
             'last_scan_at':self.last_scan_at,'last_message':self.last_message,'last_error':self.last_error,'kill_reason':self.kill_reason,
             'runtime':self.runtime_public(),'overall':{'score':ev.overall_score,'direction':ev.overall_direction,'horizons':ev.horizons} if ev else None,
-            'analyses':ev.analyses if ev else {},'candidates':self.last_candidates[:20],'rejected':self.last_rejected[-20:],
+            'analyses':ev.analyses if ev else {},'candidates':self.last_candidates[:30],'rejected':self.last_rejected[-30:],
             'open_risk_usd':round(self._open_risk_usd(),4),'recent_events':list(self.recent)[:30],
             'risk':{'max_daily_loss_pct':self.cfg.max_daily_loss_pct,'max_spread_bps':self.cfg.max_spread_bps,'max_entry_slippage_atr':self.cfg.max_entry_slippage_atr}
         }
