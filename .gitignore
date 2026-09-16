@@ -1,0 +1,39 @@
+# Secrets / local configuration
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.python-version
+
+# Runtime data
+logs/
+*.log
+.cache/
+cache/
+*.sqlite
+*.sqlite3
+*.db
+
+# Exports / generated trading data
+trade_log*.csv
+trades*.csv
+signals*.csv
+exports/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Packaging
+build/
+dist/
+*.egg-info/
