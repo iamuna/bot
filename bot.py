@@ -9,7 +9,7 @@ from typing import Any
 from blofin_client import BloFinClient,quantize_price
 from config import BotConfig
 from risk import size_for_risk
-from strategy import TF_BARS,TF_ORDER,evaluate_all,Candidate
+from strategy import NATIVE_TF_BARS,DERIVED_TFS,TF_ORDER,aggregate_timeframe,evaluate_all,Candidate
 
 ROOT=Path(__file__).resolve().parent
 LOG_DIR=ROOT/'logs';LOG_DIR.mkdir(exist_ok=True)
@@ -116,14 +116,21 @@ class Terminal3BloFinBot:
         return ''
 
     def _bootstrap_market(self):
-        for tf,bar in TF_BARS.items():
+        for tf,bar in NATIVE_TF_BARS.items():
             if self.cache.get(tf):continue
             try:
-                self.cache[tf]=self.client.get_candles(self.cfg.instrument,bar,600)
-                closed=[x for x in self.cache[tf] if x.get('closed')]
-                if closed:self.last_closed_t[tf]=int(closed[-1]['t'])
+                limit=1200 if tf=='1M' else 700
+                self.cache[tf]=self.client.get_candles(self.cfg.instrument,bar,limit)
             except Exception as e:self._event('market_bootstrap_error',timeframe=tf,error=str(e))
+        self._rebuild_derived()
+        for tf in TF_ORDER:
+            closed=[x for x in self.cache.get(tf,[]) if x.get('closed')]
+            if closed:self.last_closed_t[tf]=int(closed[-1]['t'])
         self._evaluate_market()
+
+    def _rebuild_derived(self):
+        for tf,(source_tf,multiplier) in DERIVED_TFS.items():
+            self.cache[tf]=aggregate_timeframe(self.cache.get(source_tf,[]),tf,multiplier)[-700:]
 
     @staticmethod
     def _refresh_interval(tf):
@@ -136,8 +143,8 @@ class Terminal3BloFinBot:
         for x in new:m[int(x['t'])]=x
         return [m[k] for k in sorted(m)][-keep:]
     def _refresh_due_timeframes(self):
-        now=time.time();changed=False;closed_changed=[]
-        for tf,bar in TF_BARS.items():
+        now=time.time();closed_changed=[]
+        for tf,bar in NATIVE_TF_BARS.items():
             if now<self._next_tf_refresh.get(tf,0):continue
             self._next_tf_refresh[tf]=now+self._refresh_interval(tf)
             try:
@@ -147,9 +154,17 @@ class Terminal3BloFinBot:
                 if closed:
                     ct=int(closed[-1]['t'])
                     if self.last_closed_t.get(tf)!=ct:
-                        self.last_closed_t[tf]=ct;closed_changed.append(tf);changed=True
+                        self.last_closed_t[tf]=ct;closed_changed.append(tf)
             except Exception as e:self._event('market_refresh_error',timeframe=tf,error=str(e))
-        return changed,closed_changed
+        before={tf:self.last_closed_t.get(tf) for tf in DERIVED_TFS}
+        self._rebuild_derived()
+        for tf in DERIVED_TFS:
+            closed=[x for x in self.cache.get(tf,[]) if x.get('closed')]
+            if not closed:continue
+            ct=int(closed[-1]['t'])
+            if before.get(tf)!=ct:
+                self.last_closed_t[tf]=ct;closed_changed.append(tf)
+        return bool(closed_changed),closed_changed
 
     def _evaluate_market(self):
         ev=evaluate_all(self.cache,self.runtime['signal_mode'],self.runtime['min_quality'],self.runtime['min_confluence'],self.runtime['tp_r_multiple'],set(self.runtime['enabled_timeframes']))
