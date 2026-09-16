@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Terminal 3.0 · BloFin 3m Bot</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div>
+      <div class="eyebrow">TERMINAL 3.0 ENGINE · BLOFIN EXECUTION</div>
+      <h1>BTC 3-minute trading bot</h1>
+      <div class="sub">BTC-USDT perpetual · closed-candle entries · higher-timeframe confirmation</div>
+    </div>
+    <div class="mode {{ environment }}">{{ environment|upper }}</div>
+  </header>
+
+  <section class="hero-grid">
+    <div class="card hero-price"><div class="k">BTC price</div><div class="big" id="price">—</div><div class="sub" id="spread">Waiting for BloFin…</div></div>
+    <div class="card"><div class="k">Bot</div><div class="v" id="armed">STOPPED</div><div class="sub" id="message">Starting…</div></div>
+    <div class="card"><div class="k">3m decision</div><div class="v" id="decision">—</div><div class="sub" id="decisionReason">No scan yet</div></div>
+    <div class="card"><div class="k">Equity</div><div class="v" id="equity">—</div><div class="sub" id="daily">—</div></div>
+  </section>
+
+  <section class="controls card">
+    <div class="arm-row">
+      <input id="confirm" placeholder="Type LIVE only for real-money mode" autocomplete="off">
+      <button id="arm" class="primary">ARM BOT</button>
+      <button id="stop">STOP NEW TRADES</button>
+      <button id="kill" class="danger">CLOSE BOT POSITION + STOP</button>
+      <button id="export">EXPORT TRADE LOG</button>
+    </div>
+    <div class="warning" id="warning">Paper/demo mode is intended for validation before live use.</div>
+  </section>
+
+  <main class="grid">
+    <section class="card">
+      <div class="head"><h2>3m setup</h2><span id="scanTime">—</span></div>
+      <div class="score-row">
+        <div><div class="k">Score</div><div class="score" id="score">—</div></div>
+        <div><div class="k">Quality</div><div class="score small" id="quality">—</div></div>
+        <div><div class="k">Regime</div><div class="score small" id="regime">—</div></div>
+      </div>
+      <div class="metric-grid" id="signalMetrics"></div>
+    </section>
+
+    <section class="card">
+      <div class="head"><h2>Higher-timeframe gate</h2><span>15m · 1h · 4h · 1d</span></div>
+      <div class="context-summary"><b id="contextScore">—</b><span id="contextAgreement">—</span></div>
+      <table><thead><tr><th>TF</th><th>Score</th><th>Setup</th><th>Regime</th></tr></thead><tbody id="contextRows"><tr><td colspan="4">Waiting…</td></tr></tbody></table>
+    </section>
+
+    <section class="card">
+      <div class="head"><h2>Risk engine</h2><span>hard limits</span></div>
+      <div class="metric-grid" id="riskGrid"></div>
+      <div class="note">Position size is calculated from stop distance and account equity, then capped by configured margin use. One BTC position at a time; no pyramiding.</div>
+    </section>
+
+    <section class="card">
+      <div class="head"><h2>Open position</h2><span id="owner">—</span></div>
+      <div id="position" class="position-empty">No BTC position detected.</div>
+    </section>
+  </main>
+
+  <section class="card footer-card">
+    <div class="k">How this bot trades</div>
+    <p>It waits for a new <b>confirmed 3m Terminal 3.0 BUY/SELL marker</b>, then checks 15m/1h/4h/1d context, spread, stale-entry distance, risk guards and existing positions. Stop-loss and take-profit are attached to the BloFin market order. Live trading stays locked unless you enable it locally and then type LIVE before arming.</p>
+  </section>
+
+  <div id="error" class="error"></div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
