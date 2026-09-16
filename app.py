@@ -6,8 +6,8 @@ from flask import Flask,Response,jsonify,render_template,request
 from bot import Terminal3BloFinBot,TRADE_LOG
 from config import BotConfig
 
-APP_VERSION="2.0"
-APP_TITLE="Terminal 3.0 · BloFin Multi-Timeframe Bot"
+APP_VERSION="2.1"
+APP_TITLE="Terminal 3.0 · BloFin 30-Timeframe Bot"
 cfg=BotConfig().validated();bot=Terminal3BloFinBot(cfg);bot.start_thread();app=Flask(__name__)
 
 @app.route('/')
@@ -38,10 +38,10 @@ def multi():
 @app.route('/api/trades.csv')
 def trades_csv():
     if not TRADE_LOG.exists():return Response('',mimetype='text/csv')
-    return Response(TRADE_LOG.read_text(encoding='utf-8'),mimetype='text/csv',headers={'Content-Disposition':'attachment; filename=terminal3_blofin_mtf_trades.csv'})
+    return Response(TRADE_LOG.read_text(encoding='utf-8'),mimetype='text/csv',headers={'Content-Disposition':'attachment; filename=terminal3_blofin_30tf_trades.csv'})
 @app.route('/health')
 def health():
-    s=bot.status();return jsonify({'ok':True,'armed':s['armed'],'environment':s['environment'],'price':s['price'],'positions':s['open_position_count']})
+    s=bot.status();return jsonify({'ok':True,'armed':s['armed'],'environment':s['environment'],'price':s['price'],'positions':s['open_position_count'],'unresolved_orders':s['unresolved_order_count']})
 
 def find_port(preferred=8803):
     for port in range(preferred,preferred+30):
@@ -52,7 +52,7 @@ def find_port(preferred=8803):
 
 def main():
     port=find_port();url=f'http://127.0.0.1:{port}'
-    print(f'{APP_TITLE} v{APP_VERSION}');print(f'Mode: {cfg.environment.upper()} · All native BloFin timeframes · Instrument: {cfg.instrument}');print(f'Dashboard: {url}')
+    print(f'{APP_TITLE} v{APP_VERSION}');print(f'Mode: {cfg.environment.upper()} · 30 timeframes (15 BloFin native + 15 constructed) · Instrument: {cfg.instrument}');print(f'Dashboard: {url}')
     if cfg.environment=='live':print('LIVE mode enabled locally. Dashboard still requires typing LIVE before arming.')
     else:print('Real-money trading is not enabled.')
     if os.environ.get('AUTO_OPEN_BROWSER','1')=='1':threading.Timer(1.0,lambda:webbrowser.open(url)).start()
