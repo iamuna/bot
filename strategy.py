@@ -50,6 +50,17 @@ def _bucket_start(ts: int, target_tf: str) -> int:
         return int(datetime(year,month,1,tzinfo=timezone.utc).timestamp()*1000)
     raise ValueError(f'Unsupported timeframe: {target_tf}')
 
+def _bucket_end(start: int, target_tf: str) -> int:
+    n=int(target_tf[:-1]);u=target_tf[-1]
+    if u=='m':return start+n*_MINUTE-1
+    if u=='h':return start+n*_HOUR-1
+    if u=='d':return start+n*_DAY-1
+    if u=='w':return start+n*_WEEK-1
+    if u=='M':
+        dt=datetime.fromtimestamp(start/1000,tz=timezone.utc);idx=dt.year*12+(dt.month-1)+n;year=idx//12;month=idx%12+1
+        return int(datetime(year,month,1,tzinfo=timezone.utc).timestamp()*1000)-1
+    raise ValueError(f'Unsupported timeframe: {target_tf}')
+
 def aggregate_timeframe(source: list[dict[str,Any]], target_tf: str, multiplier: int) -> list[dict[str,Any]]:
     groups: dict[int,list[dict[str,Any]]] = {}
     for b in sorted(source,key=lambda x:int(x['t'])):groups.setdefault(_bucket_start(int(b['t']),target_tf),[]).append(b)
@@ -61,7 +72,7 @@ def aggregate_timeframe(source: list[dict[str,Any]], target_tf: str, multiplier:
             't':t,'o':float(first['o']),'h':max(float(z['h']) for z in xs),'l':min(float(z['l']) for z in xs),'c':float(last['c']),
             'v':sum(float(z.get('v') or 0) for z in xs),'qv':sum(float(z.get('qv') or 0) for z in xs),'quote_v':sum(float(z.get('quote_v') or 0) for z in xs),
             'trades':sum(int(z.get('trades') or 0) for z in xs),'tb':sum(float(z.get('tb') or 0) for z in xs),'tbq':sum(float(z.get('tbq') or 0) for z in xs),
-            'ct':int(last.get('ct') or last['t']),'closed':complete,'source':f'constructed:{target_tf}',
+            'ct':_bucket_end(t,target_tf),'closed':complete,'source':f'constructed:{target_tf}',
         })
     return out
 
