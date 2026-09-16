@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Terminal 3.0 · BloFin Multi-Timeframe Bot</title>
+  <title>Terminal 3.0 · BloFin 30-Timeframe Bot</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -11,8 +11,8 @@
   <header class="top">
     <div>
       <div class="eyebrow">TERMINAL 3.0 ENGINE · BLOFIN EXECUTION</div>
-      <h1>BTC multi-timeframe trading bot</h1>
-      <div class="sub">Every native BloFin futures timeframe · independent signals · multi-position execution · closed-candle entries</div>
+      <h1>BTC 30-timeframe trading bot</h1>
+      <div class="sub">15 native BloFin intervals + 15 constructed intervals · independent closed-candle signals · multi-position execution</div>
     </div>
     <div class="top-actions"><div class="mode {{ environment }}">{{ environment|upper }}</div><div class="version">v{{ version }}</div></div>
   </header>
@@ -33,7 +33,7 @@
       <button id="multi">ENABLE MULTI-POSITION MODE</button>
       <button id="export">EXPORT TRADE LOG</button>
     </div>
-    <div class="warning" id="warning">No daily trade-count limit or cooldown. Exchange hard limit: 10 simultaneous positions per instrument.</div>
+    <div class="warning" id="warning">No daily trade-count limit or cooldown. Exchange hard limit: 10 simultaneous positions per instrument. Portfolio-risk and daily-loss circuit breakers remain active.</div>
   </section>
 
   <main class="layout">
@@ -47,26 +47,29 @@
     </section>
 
     <section class="card settings-card">
-      <div class="head"><h2>Live aggression controls</h2><span>new entries only</span></div>
+      <div class="head"><h2>Live aggression controls</h2><span>future entries only</span></div>
       <div class="setting-grid">
         <label>Signal mode<select id="signalMode"><option>Conservative</option><option>Balanced</option><option selected>Aggressive</option></select></label>
         <label>Risk / trade <span id="riskPctOut"></span><input id="riskPct" type="range" min="0.05" max="1.5" step="0.05"></label>
         <label>Leverage <span id="leverageOut"></span><input id="leverage" type="range" min="1" max="8" step="0.5"></label>
-        <label>Min quality <span id="qualityOut"></span><input id="minQuality" type="range" min="35" max="75" step="1"></label>
-        <label>Min confluence <span id="confluenceOut"></span><input id="minConfluence" type="range" min="25" max="75" step="1"></label>
-        <label>Portfolio risk cap <span id="portfolioOut"></span><input id="portfolioRisk" type="range" min="1" max="12" step="0.5"></label>
-        <label>Base target <span id="targetOut"></span><input id="targetR" type="range" min="1" max="4" step="0.1"></label>
+        <label>Min quality <span id="minQualityOut"></span><input id="minQuality" type="range" min="35" max="75" step="1"></label>
+        <label>Min confluence <span id="minConfluenceOut"></span><input id="minConfluence" type="range" min="25" max="75" step="1"></label>
+        <label>Portfolio risk cap <span id="portfolioRiskOut"></span><input id="portfolioRisk" type="range" min="1" max="12" step="0.5"></label>
+        <label>Base target <span id="targetROut"></span><input id="targetR" type="range" min="1" max="4" step="0.1"></label>
       </div>
       <button id="applySettings" class="primary wide">APPLY SETTINGS</button>
-      <div class="note">These controls change future entries only. The bot still uses hard spread, daily-loss, exchange-position and stop-loss protections.</div>
+      <div class="note">Lowering quality/confluence makes the bot more active. Risk, spread, stale-entry, daily-equity and exchange-position protections stay independent of signal aggression.</div>
     </section>
   </main>
 
   <section class="card matrix-card">
-    <div class="head"><h2>All-timeframe market map</h2><span>click row to load chart · toggle AUTO to enable/disable trading</span></div>
+    <div class="head"><h2>30-timeframe market map</h2><span>click row to load chart · toggle AUTO to trade that timeframe</span></div>
+    <div class="matrix-filters">
+      <button data-group="all" class="primary">ALL 30</button><button data-group="minutes">MINUTES</button><button data-group="hours">HOURS</button><button data-group="days">DAYS</button><button data-group="weeks">WEEKS</button><button data-group="months">MONTHS</button>
+    </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>AUTO</th><th>TF</th><th>Score</th><th>Quality</th><th>Agreement</th><th>Setup</th><th>Regime</th><th>RSI</th><th>ADX</th><th>Coverage</th></tr></thead>
-      <tbody id="tfRows"><tr><td colspan="10">Loading…</td></tr></tbody>
+      <thead><tr><th>AUTO</th><th>TF</th><th>Source</th><th>Score</th><th>Quality</th><th>Agreement</th><th>Setup</th><th>Regime</th><th>RSI</th><th>ADX</th><th>Coverage</th></tr></thead>
+      <tbody id="tfRows"><tr><td colspan="11">Loading…</td></tr></tbody>
     </table></div>
   </section>
 
@@ -86,8 +89,8 @@
   </section>
 
   <section class="card footer-card">
-    <div class="k">How v2 trades</div>
-    <p>Every native BloFin timeframe can independently create a confirmed BUY/SELL marker. The bot evaluates that setup against horizon-level and whole-market structure, then may open a separate position. There is no daily trade-count limit and no cooldown; duplicate execution of the same closed-candle signal is still prevented. BloFin itself caps Multi-Position mode at 10 positions per instrument.</p>
+    <div class="k">How v2.1 trades</div>
+    <p>Every enabled timeframe can independently create a permanent BUY/SELL candidate after its candle closes. Fifteen intervals come directly from BloFin; the other fifteen are constructed from native OHLCV bars and cannot signal until the constructed candle is complete. The engine summarizes Minutes, Hours, Days, Weeks and Months before calculating confluence so a swarm of correlated short timeframes does not automatically dominate the decision. There is no bot-imposed trade-count limit or cooldown; duplicate execution of the same closed-candle signal is still prevented.</p>
   </section>
   <div id="error" class="error"></div>
 </div>

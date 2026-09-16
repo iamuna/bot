@@ -1,34 +1,35 @@
-# v2 strategy — all-timeframe multi-position engine
+# v2.1 strategy — 30-timeframe multi-position engine
 
 ## 1. Timeframes
 
-The bot uses all native BloFin futures candle intervals:
+The strategy evaluates 30 intervals.
 
-`1m 3m 5m 15m 30m 1H 2H 4H 6H 8H 12H 1D 3D 1W 1M`
+Native BloFin candles:
 
-Any enabled timeframe can create a trade. A timeframe is not merely a confirmation layer for another timeframe.
+`1m 3m 5m 15m 30m 1h 2h 4h 6h 8h 12h 1d 3d 1w 1M`
+
+Constructed locally from native OHLCV candles:
+
+`45m 3h 16h 2d 4d 5d 6d 2w 3w 2M 3M 4M 5M 6M 12M`
+
+Any enabled timeframe can create a trade. There is no master entry timeframe.
+
+A constructed interval cannot generate a permanent entry until enough closed source candles exist to complete that constructed bar.
 
 ## 2. Technical score
 
-Each timeframe gets a score from roughly -100 to +100 built from four families:
+Each timeframe receives a roughly -100 to +100 score built from four independent families:
 
-- Trend: EMA20/50/200 structure, regression slope, ADX directional pressure
-- Momentum: RSI, MACD histogram, Stochastic, ROC
-- Structure: 20-candle breakout/breakdown, range location, Bollinger location, regression structure
-- Flow: relative volume, VWAP position, OBV pressure, CMF
+- **Trend — 32%:** EMA20/50/200 structure, regression slope and ADX directional pressure.
+- **Momentum — 23%:** RSI, MACD histogram, Stochastic and ROC.
+- **Structure — 27%:** breakout/breakdown behavior, range position, Bollinger location and regression structure.
+- **Flow — 18%:** relative volume, VWAP position, OBV pressure and CMF.
 
-The combined weights are:
-
-- Trend 32%
-- Momentum 23%
-- Structure 27%
-- Flow 18%
-
-Aggressive mode lowers the score threshold and slightly increases score sensitivity.
+Aggressive mode reduces the score threshold and slightly increases score sensitivity. It does not disable the execution/risk guards.
 
 ## 3. Regime detection
 
-The engine labels conditions including:
+The engine distinguishes conditions such as:
 
 - BREAKOUT UP / BREAKOUT DOWN
 - TREND UP / TREND DOWN
@@ -37,43 +38,62 @@ The engine labels conditions including:
 - HIGH VOLATILITY
 - MIXED
 
-Range entries require better evidence unless setup quality is unusually high. Severe EMA20/ATR overextension is also penalized.
+Range signals generally need breakout confirmation unless quality is unusually high. Severe EMA20/ATR overextension is also penalized.
 
-## 4. Horizon model
+## 4. Hierarchical multi-timeframe model
 
-To avoid 15 highly correlated timeframes creating false confidence, timeframes are summarized first into:
+Thirty correlated intervals are not treated as 30 independent votes. They are summarized first into five horizons:
 
-- Micro: 1m / 3m / 5m
-- Intraday: 15m / 30m / 1h / 2h / 4h
-- Swing: 6h / 8h / 12h / 1d / 3d
-- Macro: 1w / 1M
+- **Minutes:** 1m / 3m / 5m / 15m / 30m / 45m
+- **Hours:** 1h / 2h / 3h / 4h / 6h / 8h / 12h / 16h
+- **Days:** 1d / 2d / 3d / 4d / 5d / 6d
+- **Weeks:** 1w / 2w / 3w
+- **Months:** 1M / 2M / 3M / 4M / 5M / 6M / 12M
 
-The horizon scores are then combined into an overall market score. A trade's confluence uses its own horizon plus broader/higher-timeframe context. Ordinary counter-trend trades are allowed; only very strong broad opposition blocks a moderate-quality setup.
+The current horizon weights are:
+
+- Minutes 14%
+- Hours 29%
+- Days 28%
+- Weeks 16%
+- Months 13%
+
+Coverage and per-timeframe importance modify the effective contribution. Very short intervals and extremely long intervals are intentionally downweighted relative to the central 1h–1d structure.
+
+A candidate's confluence combines its own horizon, the whole-market score and higher-horizon context. Counter-trend signals can still trade when their quality is high enough; very strong broad opposition blocks ordinary-quality signals.
 
 ## 5. Entry trigger
 
-A permanent entry candidate appears only on a **closed candle** when that timeframe produces a fresh Terminal score cross / breakout / breakdown signal.
+A candidate exists only when a **closed candle** on an enabled timeframe creates a fresh Terminal score-cross, breakout or breakdown marker.
 
-Duplicate execution of the same `{timeframe, candle, side}` is prevented. This is not a trade-frequency cap; it only prevents placing the same order repeatedly every poll cycle.
+The key `{timeframe, candle timestamp, side}` is stored after execution so polling cannot repeatedly place the same trade. That is duplicate protection, not a frequency limit.
 
-## 6. Multiple positions
+## 6. Multiple independent positions
 
-In PAPER mode, each accepted signal creates an independent simulated position.
+PAPER mode creates a separate simulated position for every accepted setup.
 
-In DEMO/LIVE, v2 expects BloFin Hedge + Multi-Position mode. Opening orders omit `positionId`, causing BloFin to create a new independent position. Closing an individual position uses its `positionId`.
+DEMO/LIVE expects BloFin Hedge + Multi-Position mode. New opening orders omit `positionId`, so each accepted setup can create its own independent position. The bot resolves the generated `positionId` through BloFin Order Detail/current positions, records it, and uses that ID when an individual bot-owned position must be closed.
 
-BloFin documents a hard maximum of 10 positions per instrument in Multi-Position mode. That is the only position-count ceiling used by the strategy.
+Pending position-ID resolution reserves the trade's planned risk so a temporarily unresolved fill cannot let the next trade bypass the portfolio-risk cap.
 
-## 7. Risk
+When an exchange position disappears from the open-position list, stale bot ownership/risk tracking is removed automatically.
 
-There is no max-trades-per-day rule and no cooldown. Risk is controlled by:
+BloFin's exchange-level Multi-Position limit remains 10 positions per instrument.
+
+## 7. Risk and execution
+
+There is no max-trades-per-day rule and no cooldown. New signals may trade whenever they pass the model and execution checks.
+
+Risk remains controlled by:
 
 - account-risk sizing per position;
 - portfolio planned-risk cap;
 - daily equity stop;
 - spread filter;
-- stale-entry / slippage-vs-ATR filter;
-- server-side mark-price stop-loss and take-profit in BloFin;
-- exchange 10-position limit.
+- stale-entry / ATR slippage filter;
+- server-side mark-price stop-loss and take-profit;
+- exchange 10-position limit;
+- duplicate-signal prevention;
+- unresolved-order risk reservation.
 
-A faster strategy is not allowed to become an unbounded-loss strategy.
+The goal is higher activity, not unbounded account exposure.
