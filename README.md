@@ -1,6 +1,30 @@
-# Terminal 3.0 · BloFin 30-Timeframe Bot v2.1
+# Terminal 3.0 · BloFin 30-Timeframe Bot v2.2
 
 A BTC-USDT perpetual trading bot built from the Terminal 3.0 TA engine. It evaluates **30 timeframes**, lets every enabled timeframe create its own closed-candle trade candidate, and supports multiple independent positions through BloFin Hedge + Multi-Position mode.
+
+## What changed in v2.2
+
+The manual aggression panel and the manual **Enable Multi-Position Mode** button are gone.
+
+The bot now uses one predetermined built-in trading profile and automatically ensures Multi-Position mode when you arm it. PAPER mode is multi-position by default. DEMO/LIVE checks BloFin and requests Hedge + Multi-Position mode automatically if it is not already active. If BloFin refuses the account-mode change because positions/orders are open, the bot stops the arm request and shows the exchange error instead of silently falling back to single-position behavior.
+
+## Fixed trading profile
+
+These values are built into v2.2 and are not dashboard or `.env` aggression controls:
+
+- Signal mode: `Aggressive`
+- Risk per new position: `1.45%` of equity
+- Leverage: `7x`
+- Max margin allocation used by position sizing: `45%`
+- Portfolio planned-risk cap: `11.5%` of equity
+- Minimum setup quality: `35%`
+- Minimum multi-timeframe confluence: `25%`
+- Base take-profit reference: `2.0R`, scaled slightly by horizon
+- No max-trades-per-day rule
+- No cooldown
+- Duplicate execution of the same `{timeframe, closed candle, side}` is prevented
+
+Independent safety checks remain active: daily equity stop, spread filter, stale-entry/ATR slippage filter, stop-losses, portfolio-risk cap, exchange position limit and unresolved-order risk reservation.
 
 ## Timeframe universe
 
@@ -8,7 +32,7 @@ BloFin supplies these 15 intervals natively:
 
 `1m 3m 5m 15m 30m 1H 2H 4H 6H 8H 12H 1D 3D 1W 1M`
 
-v2.1 constructs another 15 from those native OHLCV bars:
+The bot constructs another 15 from native OHLCV bars:
 
 `45m 3h 16h 2d 4d 5d 6d 2w 3w 2M 3M 4M 5M 6M 12M`
 
@@ -24,7 +48,7 @@ Constructed candles preserve open/high/low/close and aggregate volume fields. An
 
 ## Strategy architecture
 
-There is no master 3-minute trigger anymore. Any enabled timeframe can independently generate a BUY or SELL candidate when its just-closed candle creates a fresh Terminal signal.
+There is no master 3-minute trigger. Any enabled timeframe can independently generate a BUY or SELL candidate when its just-closed candle creates a fresh Terminal signal.
 
 The engine scores each timeframe using:
 
@@ -36,40 +60,26 @@ The engine scores each timeframe using:
 
 To reduce fake confidence from correlated intervals, scores are summarized into **Minutes / Hours / Days / Weeks / Months** before being combined into the overall market context and each candidate's confluence score.
 
-## Aggressive defaults
-
-- Signal mode: `Aggressive`
-- Risk per new position: `0.35%` of equity
-- Leverage: `3x`
-- Max margin allocation used by position sizing: `45%`
-- Portfolio planned-risk cap: `5%` of equity
-- Daily equity stop: `5%`
-- Base take-profit reference: `1.8R`, scaled slightly by horizon
-- No max-trades-per-day rule
-- No cooldown
-- Duplicate execution of the same `{timeframe, closed candle, side}` is prevented
-
-Trade frequency is intentionally unrestricted by an arbitrary daily count, but exposure is still bounded by portfolio risk, daily equity loss, spread, stale-entry and exchange limits.
-
 ## Multiple positions
 
-PAPER mode simulates independent positions locally.
+PAPER mode simulates independent positions locally and starts in multi-position behavior automatically.
 
-DEMO/LIVE expects BloFin Hedge + Multi-Position mode. Each accepted new opening signal is submitted without a `positionId`, allowing BloFin to create a separate position. The bot then resolves the generated `positionId` through Order Detail / current positions and tracks the position independently until it disappears from the open-position set.
+For DEMO/LIVE, arming the bot automatically checks BloFin account mode. If Hedge + Multi-Position is not already active, the bot requests it before trading. New opening orders omit `positionId`, allowing BloFin to create a separate position. The bot then resolves the generated `positionId` through Order Detail/current positions and tracks that position independently.
 
 BloFin currently documents a hard maximum of **10 positions per instrument** in Multi-Position mode. The bot does not add a smaller position-count or daily trade-count limit.
 
 ## Dashboard
 
-The local UI updates continuously and includes:
+The local UI includes:
 
 - live BTC price/spread and equity;
 - overall 30-timeframe bias;
-- selectable candlestick chart for every native or constructed timeframe;
-- filters for Minutes / Hours / Days / Weeks / Months;
-- per-timeframe AUTO toggles;
+- one large selectable candlestick chart;
+- Minutes / Hours / Days / Weeks / Months filters;
+- per-timeframe AUTO switches;
 - score, quality, agreement, setup, regime, RSI, ADX and data coverage;
-- live aggression controls for signal mode, risk, leverage, quality, confluence, portfolio risk and target R;
+- fixed-profile status instead of aggression sliders;
+- automatic Multi-Position status instead of an enable button;
 - fresh candidate feed;
 - multiple-position list;
 - activity/error stream;
@@ -112,4 +122,4 @@ Run:
 
 `python self_test.py`
 
-GitHub Actions also compiles the project and runs the offline self-test on pushes and pull requests.
+GitHub Actions compiles the project, validates the dashboard JavaScript and runs the offline self-test on pushes and pull requests.
