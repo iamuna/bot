@@ -12,6 +12,23 @@
 
   async function req(url,opt){const r=await fetch(url,opt);const j=await r.json();if(!r.ok||j.ok===false)throw new Error(j.error||'Request failed');return j}
 
+  function renderReporting(s){
+    const r=s.reporting||{},latest=r.latest||null;
+    if(!s.armed){$('reportStatus').textContent='Starts when the bot is armed.'}
+    else if(r.next_report_at){
+      const ms=new Date(r.next_report_at).getTime()-Date.now(),sec=Math.max(0,Math.floor(ms/1000));
+      const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),ss=sec%60;
+      $('reportStatus').textContent=`Next report in ${h}h ${m}m ${ss}s`;
+    }else $('reportStatus').textContent='Scheduling report…';
+    if(latest){
+      const p=latest.performance||{},wr=p.win_rate_pct==null?'n/a':Number(p.win_rate_pct).toFixed(1)+'%';
+      $('reportMetrics').textContent=`Last: ${p.opened||0} opened · ${p.closed||0} closed · ${p.wins||0}W/${p.losses||0}L · ${wr} · P&L ${money(p.realized_pnl||0)}`;
+      $('downloadReport').disabled=false;
+    }else{
+      $('reportMetrics').textContent='No report yet.';$('downloadReport').disabled=true;
+    }
+  }
+
   function render(s){
     state=s;$('price').textContent=money(s.price);
     if(s.bid&&s.ask){const mid=(+s.bid + +s.ask)/2,bps=(+s.ask-+s.bid)/mid*10000;$('spread').textContent=`Bid ${money(s.bid)} · Ask ${money(s.ask)} · ${bps.toFixed(1)} bps`}
@@ -21,8 +38,8 @@
     $('posCount').textContent=s.open_position_count??0;$('posCap').textContent=s.exchange_position_cap??10;$('equity').textContent=money(s.equity);$('openRisk').textContent=money(s.open_risk_usd);
     const pm=s.position_mode||{},auto=String(pm.positionMode||'').toLowerCase()==='long_short_mode'&&String(pm.multiPosition||'false').toLowerCase()==='true';
     $('multiStatus').textContent=auto?'MULTI-POSITION AUTO · ON':'MULTI-POSITION AUTO · READY';$('multiStatus').className='auto-pill '+(auto?'on':'');
-    renderMatrix(s);renderCandidates(s);renderPositions(s);renderEvents(s);
-    if(s.environment==='live')$('warning').textContent='REAL-MONEY MODE. Fixed aggressive profile. Multi-position mode is automatic when armed. No daily trade-count limit or cooldown; portfolio-risk, daily-loss, spread and stop protections remain.';
+    renderReporting(s);renderMatrix(s);renderCandidates(s);renderPositions(s);renderEvents(s);
+    if(s.environment==='live')$('warning').textContent='REAL-MONEY MODE. Fixed aggressive profile. Multi-position mode is automatic when armed. A performance report is generated every 3 hours. No daily trade-count limit or cooldown; portfolio-risk, daily-loss, spread and stop protections remain.';
     if(s.last_error){$('error').style.display='block';$('error').textContent=s.last_error}else $('error').style.display='none';
   }
 
@@ -79,6 +96,7 @@
   $('stop').addEventListener('click',async()=>{await req('/api/stop',{method:'POST'});poll()});
   $('kill').addEventListener('click',async()=>{if(confirm('Close every bot-owned position from this process and stop new entries?')){await req('/api/kill',{method:'POST'});poll()}});
   $('export').addEventListener('click',()=>location.href='/api/trades.csv');
+  $('downloadReport').addEventListener('click',()=>location.href='/api/report/latest.md');
   $('zoomOut').addEventListener('click',()=>{chartLimit=Math.min(300,chartLimit+30);loadChart()});$('zoomIn').addEventListener('click',()=>{chartLimit=Math.max(30,chartLimit-30);loadChart()});
 
   async function poll(){try{render(await req('/api/status'))}catch(e){$('error').style.display='block';$('error').textContent=e.message}}
