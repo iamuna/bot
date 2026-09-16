@@ -12,7 +12,7 @@
     <div>
       <div class="eyebrow">TERMINAL 3.0 ENGINE · BLOFIN EXECUTION</div>
       <h1>BTC 30-timeframe trading bot</h1>
-      <div class="sub">15 native BloFin intervals + 15 constructed intervals · independent closed-candle signals · multi-position execution</div>
+      <div class="sub">15 native BloFin intervals + 15 constructed intervals · fixed aggressive profile · automatic multi-position execution</div>
     </div>
     <div class="top-actions"><div class="mode {{ environment }}">{{ environment|upper }}</div><div class="version">v{{ version }}</div></div>
   </header>
@@ -30,35 +30,23 @@
       <button id="arm" class="primary">ARM BOT</button>
       <button id="stop">PAUSE NEW ENTRIES</button>
       <button id="kill" class="danger">CLOSE BOT POSITIONS + STOP</button>
-      <button id="multi">ENABLE MULTI-POSITION MODE</button>
       <button id="export">EXPORT TRADE LOG</button>
     </div>
-    <div class="warning" id="warning">No daily trade-count limit or cooldown. Exchange hard limit: 10 simultaneous positions per instrument. Portfolio-risk and daily-loss circuit breakers remain active.</div>
+    <div class="status-strip">
+      <span><b>FIXED PROFILE:</b> Aggressive · 1.45% risk/trade · 7× leverage · quality 35% · confluence 25% · portfolio risk cap 11.5% · target 2.0R</span>
+      <span id="multiStatus" class="auto-pill">MULTI-POSITION AUTO</span>
+    </div>
+    <div class="warning" id="warning">No manual aggression controls. No daily trade-count limit or cooldown. Multi-position mode is enabled automatically when the bot is armed. Portfolio-risk and daily-loss circuit breakers remain active.</div>
   </section>
 
-  <main class="layout">
+  <main class="layout single">
     <section class="card chart-card">
       <div class="head">
         <div><h2>Selected timeframe</h2><span id="chartLabel">1h · click any timeframe below</span></div>
         <div class="chart-tools"><button id="zoomOut">−</button><span id="zoomLabel">120 candles</span><button id="zoomIn">+</button></div>
       </div>
-      <canvas id="chart" width="1100" height="420" aria-label="BTC candlestick chart"></canvas>
+      <canvas id="chart" width="1100" height="500" aria-label="BTC candlestick chart"></canvas>
       <div class="chart-readout" id="chartReadout">Move over the chart for candle details.</div>
-    </section>
-
-    <section class="card settings-card">
-      <div class="head"><h2>Live aggression controls</h2><span>future entries only</span></div>
-      <div class="setting-grid">
-        <label>Signal mode<select id="signalMode"><option>Conservative</option><option>Balanced</option><option selected>Aggressive</option></select></label>
-        <label>Risk / trade <span id="riskPctOut"></span><input id="riskPct" type="range" min="0.05" max="1.5" step="0.05"></label>
-        <label>Leverage <span id="leverageOut"></span><input id="leverage" type="range" min="1" max="8" step="0.5"></label>
-        <label>Min quality <span id="minQualityOut"></span><input id="minQuality" type="range" min="35" max="75" step="1"></label>
-        <label>Min confluence <span id="minConfluenceOut"></span><input id="minConfluence" type="range" min="25" max="75" step="1"></label>
-        <label>Portfolio risk cap <span id="portfolioRiskOut"></span><input id="portfolioRisk" type="range" min="1" max="12" step="0.5"></label>
-        <label>Base target <span id="targetROut"></span><input id="targetR" type="range" min="1" max="4" step="0.1"></label>
-      </div>
-      <button id="applySettings" class="primary wide">APPLY SETTINGS</button>
-      <div class="note">Lowering quality/confluence makes the bot more active. Risk, spread, stale-entry, daily-equity and exchange-position protections stay independent of signal aggression.</div>
     </section>
   </main>
 
@@ -89,8 +77,8 @@
   </section>
 
   <section class="card footer-card">
-    <div class="k">How v2.1 trades</div>
-    <p>Every enabled timeframe can independently create a permanent BUY/SELL candidate after its candle closes. Fifteen intervals come directly from BloFin; the other fifteen are constructed from native OHLCV bars and cannot signal until the constructed candle is complete. The engine summarizes Minutes, Hours, Days, Weeks and Months before calculating confluence so a swarm of correlated short timeframes does not automatically dominate the decision. There is no bot-imposed trade-count limit or cooldown; duplicate execution of the same closed-candle signal is still prevented.</p>
+    <div class="k">How v2.2 trades</div>
+    <p>The bot uses one built-in aggressive profile and does not expose manual aggression sliders. Every enabled timeframe can independently create a permanent BUY/SELL candidate after its candle closes. Multi-position mode is automatic: PAPER mode starts that way, while DEMO/LIVE checks BloFin and requests Hedge + Multi-Position mode when you arm the bot if needed. Fifteen intervals come directly from BloFin; the other fifteen are constructed from native OHLCV bars and cannot signal until the constructed candle is complete.</p>
   </section>
   <div id="error" class="error"></div>
 </div>

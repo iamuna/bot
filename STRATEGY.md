@@ -1,4 +1,4 @@
-# v2.1 strategy — 30-timeframe multi-position engine
+# v2.2 strategy — fixed-profile 30-timeframe multi-position engine
 
 ## 1. Timeframes
 
@@ -12,11 +12,24 @@ Constructed locally from native OHLCV candles:
 
 `45m 3h 16h 2d 4d 5d 6d 2w 3w 2M 3M 4M 5M 6M 12M`
 
-Any enabled timeframe can create a trade. There is no master entry timeframe.
+Any enabled timeframe can create a trade. There is no master entry timeframe. A constructed interval cannot generate a permanent entry until enough closed source candles exist to complete that constructed bar.
 
-A constructed interval cannot generate a permanent entry until enough closed source candles exist to complete that constructed bar.
+## 2. Predetermined trading profile
 
-## 2. Technical score
+v2.2 deliberately removes dashboard aggression controls. The strategy uses one fixed profile:
+
+- Signal mode: Aggressive
+- Risk/trade: 1.45% of equity
+- Leverage: 7x
+- Max margin use in sizing: 45%
+- Portfolio planned-risk cap: 11.5%
+- Minimum quality: 35%
+- Minimum confluence: 25%
+- Base target: 2.0R, adjusted slightly by horizon
+
+These are code-level strategy constants rather than runtime UI or `.env` controls.
+
+## 3. Technical score
 
 Each timeframe receives a roughly -100 to +100 score built from four independent families:
 
@@ -25,22 +38,13 @@ Each timeframe receives a roughly -100 to +100 score built from four independent
 - **Structure — 27%:** breakout/breakdown behavior, range position, Bollinger location and regression structure.
 - **Flow — 18%:** relative volume, VWAP position, OBV pressure and CMF.
 
-Aggressive mode reduces the score threshold and slightly increases score sensitivity. It does not disable the execution/risk guards.
+The Aggressive signal model reduces the score threshold and slightly increases score sensitivity, while execution/risk guards remain independent.
 
-## 3. Regime detection
+## 4. Regime detection
 
-The engine distinguishes conditions such as:
+The engine distinguishes conditions such as BREAKOUT UP / BREAKOUT DOWN, TREND UP / TREND DOWN, RANGE, SQUEEZE, HIGH VOLATILITY and MIXED. Range signals generally need breakout confirmation unless quality is unusually high. Severe EMA20/ATR overextension is also penalized.
 
-- BREAKOUT UP / BREAKOUT DOWN
-- TREND UP / TREND DOWN
-- RANGE
-- SQUEEZE
-- HIGH VOLATILITY
-- MIXED
-
-Range signals generally need breakout confirmation unless quality is unusually high. Severe EMA20/ATR overextension is also penalized.
-
-## 4. Hierarchical multi-timeframe model
+## 5. Hierarchical multi-timeframe model
 
 Thirty correlated intervals are not treated as 30 independent votes. They are summarized first into five horizons:
 
@@ -50,50 +54,24 @@ Thirty correlated intervals are not treated as 30 independent votes. They are su
 - **Weeks:** 1w / 2w / 3w
 - **Months:** 1M / 2M / 3M / 4M / 5M / 6M / 12M
 
-The current horizon weights are:
+The current horizon weights are Minutes 14%, Hours 29%, Days 28%, Weeks 16% and Months 13%. Coverage and per-timeframe importance modify effective contribution. A candidate's confluence combines its own horizon, whole-market score and higher-horizon context.
 
-- Minutes 14%
-- Hours 29%
-- Days 28%
-- Weeks 16%
-- Months 13%
+## 6. Entry trigger
 
-Coverage and per-timeframe importance modify the effective contribution. Very short intervals and extremely long intervals are intentionally downweighted relative to the central 1h–1d structure.
+A candidate exists only when a **closed candle** on an enabled timeframe creates a fresh Terminal score-cross, breakout or breakdown marker. The key `{timeframe, candle timestamp, side}` is stored after execution so polling cannot repeatedly place the same trade. That is duplicate protection, not a frequency limit.
 
-A candidate's confluence combines its own horizon, the whole-market score and higher-horizon context. Counter-trend signals can still trade when their quality is high enough; very strong broad opposition blocks ordinary-quality signals.
+## 7. Automatic multiple positions
 
-## 5. Entry trigger
+PAPER mode always uses independent simulated positions.
 
-A candidate exists only when a **closed candle** on an enabled timeframe creates a fresh Terminal score-cross, breakout or breakdown marker.
+For DEMO/LIVE there is no manual Multi-Position button. When the user arms the bot, it automatically checks BloFin account mode. If Hedge + Multi-Position is not active, the bot requests it before entering trades. If BloFin rejects the mode change because positions/orders are open, arming fails visibly instead of silently switching to single-position behavior.
 
-The key `{timeframe, candle timestamp, side}` is stored after execution so polling cannot repeatedly place the same trade. That is duplicate protection, not a frequency limit.
+New opening orders omit `positionId`, so each accepted setup can create its own independent position. The bot resolves the generated `positionId` through BloFin Order Detail/current positions, records it, and uses that ID when an individual bot-owned position must be closed.
 
-## 6. Multiple independent positions
+Pending position-ID resolution reserves the trade's planned risk so a temporarily unresolved fill cannot let the next trade bypass the portfolio-risk cap. BloFin's exchange-level Multi-Position limit remains 10 positions per instrument.
 
-PAPER mode creates a separate simulated position for every accepted setup.
-
-DEMO/LIVE expects BloFin Hedge + Multi-Position mode. New opening orders omit `positionId`, so each accepted setup can create its own independent position. The bot resolves the generated `positionId` through BloFin Order Detail/current positions, records it, and uses that ID when an individual bot-owned position must be closed.
-
-Pending position-ID resolution reserves the trade's planned risk so a temporarily unresolved fill cannot let the next trade bypass the portfolio-risk cap.
-
-When an exchange position disappears from the open-position list, stale bot ownership/risk tracking is removed automatically.
-
-BloFin's exchange-level Multi-Position limit remains 10 positions per instrument.
-
-## 7. Risk and execution
+## 8. Risk and execution
 
 There is no max-trades-per-day rule and no cooldown. New signals may trade whenever they pass the model and execution checks.
 
-Risk remains controlled by:
-
-- account-risk sizing per position;
-- portfolio planned-risk cap;
-- daily equity stop;
-- spread filter;
-- stale-entry / ATR slippage filter;
-- server-side mark-price stop-loss and take-profit;
-- exchange 10-position limit;
-- duplicate-signal prevention;
-- unresolved-order risk reservation.
-
-The goal is higher activity, not unbounded account exposure.
+Risk remains controlled by account-risk sizing, the fixed 11.5% portfolio planned-risk cap, daily equity stop, spread filter, stale-entry / ATR slippage filter, server-side mark-price stop-loss and take-profit, exchange position limit, duplicate-signal prevention and unresolved-order risk reservation.

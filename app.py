@@ -3,10 +3,11 @@ from __future__ import annotations
 import os,socket,threading,webbrowser
 from flask import Flask,Response,jsonify,render_template,request
 
+from automation import ensure_multi_position
 from bot import Terminal3BloFinBot,TRADE_LOG
 from config import BotConfig
 
-APP_VERSION="2.1"
+APP_VERSION="2.2"
 APP_TITLE="Terminal 3.0 · BloFin 30-Timeframe Bot"
 cfg=BotConfig().validated();bot=Terminal3BloFinBot(cfg);bot.start_thread();app=Flask(__name__)
 
@@ -20,21 +21,24 @@ def chart():
     except Exception as e:return jsonify({'ok':False,'error':str(e)}),400
 @app.route('/api/settings',methods=['POST'])
 def settings():
-    try:return jsonify({'ok':True,'settings':bot.update_runtime(request.get_json(silent=True) or {})})
+    try:
+        p=request.get_json(silent=True) or {}
+        unknown=set(p)-{'enabled_timeframes'}
+        if unknown:raise ValueError('The trading profile is fixed in v2.2; only timeframe AUTO switches can be changed.')
+        return jsonify({'ok':True,'settings':bot.update_runtime(p)})
     except Exception as e:return jsonify({'ok':False,'error':str(e)}),400
 @app.route('/api/arm',methods=['POST'])
 def arm():
     try:
-        p=request.get_json(silent=True) or {};bot.arm(str(p.get('confirmation','')));return jsonify({'ok':True,'status':bot.status()})
+        p=request.get_json(silent=True) or {}
+        ensure_multi_position(bot)
+        bot.arm(str(p.get('confirmation','')))
+        return jsonify({'ok':True,'status':bot.status()})
     except Exception as e:return jsonify({'ok':False,'error':str(e)}),400
 @app.route('/api/stop',methods=['POST'])
 def stop():bot.disarm();return jsonify({'ok':True,'status':bot.status()})
 @app.route('/api/kill',methods=['POST'])
 def kill():bot.close_bot_positions_and_disarm();return jsonify({'ok':True,'status':bot.status()})
-@app.route('/api/enable-multiposition',methods=['POST'])
-def multi():
-    try:return jsonify({'ok':True,'position_mode':bot.enable_multi_position_mode()})
-    except Exception as e:return jsonify({'ok':False,'error':str(e)}),400
 @app.route('/api/trades.csv')
 def trades_csv():
     if not TRADE_LOG.exists():return Response('',mimetype='text/csv')
@@ -52,7 +56,7 @@ def find_port(preferred=8803):
 
 def main():
     port=find_port();url=f'http://127.0.0.1:{port}'
-    print(f'{APP_TITLE} v{APP_VERSION}');print(f'Mode: {cfg.environment.upper()} · 30 timeframes (15 BloFin native + 15 constructed) · Instrument: {cfg.instrument}');print(f'Dashboard: {url}')
+    print(f'{APP_TITLE} v{APP_VERSION}');print(f'Mode: {cfg.environment.upper()} · 30 timeframes (15 BloFin native + 15 constructed) · Instrument: {cfg.instrument}');print(f'Profile: {cfg.profile_name} · multi-position is automatic when armed');print(f'Dashboard: {url}')
     if cfg.environment=='live':print('LIVE mode enabled locally. Dashboard still requires typing LIVE before arming.')
     else:print('Real-money trading is not enabled.')
     if os.environ.get('AUTO_OPEN_BROWSER','1')=='1':threading.Timer(1.0,lambda:webbrowser.open(url)).start()

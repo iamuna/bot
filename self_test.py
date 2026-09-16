@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import random
+from types import SimpleNamespace
 
+from automation import ensure_multi_position,multi_position_enabled
 from blofin_client import BloFinClient,quantize_price,quantize_step
 from bot import Terminal3BloFinBot
 from config import BotConfig
@@ -30,6 +32,41 @@ def dataset(direction=1):
     return {tf:bars_cross(direction,350,90_000,tf_ms(tf)) for tf in TF_ORDER}
 
 
+def test_fixed_profile():
+    cfg=BotConfig(environment='paper',paper_equity=1000)
+    assert cfg.profile_name=='Fixed Aggressive'
+    assert cfg.signal_mode=='Aggressive'
+    assert cfg.risk_pct==1.45
+    assert cfg.leverage==7.0
+    assert cfg.max_margin_use_pct==45.0
+    assert cfg.max_total_open_risk_pct==11.5
+    assert cfg.min_quality==35.0
+    assert cfg.min_confluence==25.0
+    assert cfg.tp_r_multiple==2.0
+    assert cfg.require_multi_position is True
+
+
+def test_automatic_multi_position():
+    assert multi_position_enabled({'positionMode':'long_short_mode','multiPosition':'true'})
+    assert not multi_position_enabled({'positionMode':'net_mode','multiPosition':'false'})
+
+    class FakeClient:
+        def __init__(self):self.mode={'positionMode':'net_mode','multiPosition':'false'}
+        def get_margin_mode(self):return 'isolated'
+        def get_position_mode(self):return dict(self.mode)
+
+    class FakeBot:
+        def __init__(self,environment):
+            self.cfg=SimpleNamespace(environment=environment);self.client=FakeClient();self.position_mode={};self.margin_mode=''
+        def enable_multi_position_mode(self):
+            self.client.mode={'positionMode':'long_short_mode','multiPosition':'true'};self.position_mode=dict(self.client.mode);return self.position_mode
+
+    live=FakeBot('demo');mode=ensure_multi_position(live)
+    assert multi_position_enabled(mode) and live.margin_mode=='isolated'
+    paper=FakeBot('paper');mode=ensure_multi_position(paper)
+    assert multi_position_enabled(mode)
+
+
 def test_signing_and_order_detail_route():
     c=BloFinClient('key','secret','pass',demo=True);h=c._headers('/api/v1/account/balance','GET','');assert h['ACCESS-KEY']=='key' and h['ACCESS-SIGN']
     class Capture(BloFinClient):
@@ -54,7 +91,9 @@ def test_constructed_candles():
 def test_all_timeframes():
     assert len(NATIVE_TF_BARS)==15 and len(DERIVED_TFS)==15 and len(TF_ORDER)==30
     assert set(HORIZONS)=={'minutes','hours','days','weeks','months'}
-    up=evaluate_all(dataset(1),'Aggressive',45,38,1.8);dn=evaluate_all(dataset(-1),'Aggressive',45,38,1.8)
+    cfg=BotConfig(environment='paper')
+    up=evaluate_all(dataset(1),cfg.signal_mode,cfg.min_quality,cfg.min_confluence,cfg.tp_r_multiple)
+    dn=evaluate_all(dataset(-1),cfg.signal_mode,cfg.min_quality,cfg.min_confluence,cfg.tp_r_multiple)
     assert up.overall_score>20,up.overall_score
     assert dn.overall_score<-20,dn.overall_score
     assert len(up.candidates)>=25,len(up.candidates)
@@ -66,15 +105,17 @@ def test_all_timeframes():
 
 def test_risk():
     inst={'contractValue':'0.001','minSize':'0.1','lotSize':'0.1','maxMarketSize':'1000000'}
-    p=size_for_risk(1000,100000,99500,inst,.35,3,45)
-    assert float(p.contracts)>=.1 and p.risk_usd<=3.6
+    cfg=BotConfig(environment='paper')
+    p=size_for_risk(1000,100000,99500,inst,cfg.risk_pct,cfg.leverage,cfg.max_margin_use_pct)
+    assert float(p.contracts)>=.1 and p.risk_usd<=14.6
     assert quantize_step(1.234,.1)=='1.2';assert quantize_price(100.26,.5)=='100.5'
 
 
 def test_multiple_paper_positions():
-    bot=Terminal3BloFinBot(BotConfig(environment='paper',signal_mode='Aggressive',paper_equity=1000))
+    cfg=BotConfig(environment='paper',paper_equity=1000)
+    bot=Terminal3BloFinBot(cfg)
     bot.instrument={'contractValue':'0.001','minSize':'0.1','lotSize':'0.1','maxMarketSize':'1000000','tickSize':'0.1'}
-    ev=evaluate_all(dataset(1),'Aggressive',45,38,1.8);bot.last_eval=ev
+    ev=evaluate_all(dataset(1),cfg.signal_mode,cfg.min_quality,cfg.min_confluence,cfg.tp_r_multiple);bot.last_eval=ev
     c1,c2=ev.candidates[0],ev.candidates[1]
     for c in (c1,c2):
         t={'last':str(c.entry_reference),'bidPrice':str(c.entry_reference-.5),'askPrice':str(c.entry_reference+.5)}
@@ -85,7 +126,7 @@ def test_multiple_paper_positions():
 
 
 def main():
-    test_signing_and_order_detail_route();test_constructed_candles();test_all_timeframes();test_risk();test_multiple_paper_positions()
-    print('SELF TEST OK: signing, order-detail tracking, 30 timeframes, aggregation, multi-horizon TA, multi-position paper execution, sizing')
+    test_fixed_profile();test_automatic_multi_position();test_signing_and_order_detail_route();test_constructed_candles();test_all_timeframes();test_risk();test_multiple_paper_positions()
+    print('SELF TEST OK: fixed profile, auto multi-position, signing, order-detail tracking, 30 timeframes, aggregation, multi-horizon TA, multi-position paper execution, sizing')
 
 if __name__=='__main__':main()
