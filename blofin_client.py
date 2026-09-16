@@ -20,7 +20,7 @@ class BloFinClient:
         self.session=requests.Session()
         retry=Retry(total=4,connect=4,read=4,status=4,backoff_factor=.4,status_forcelist=(418,429,500,502,503,504),allowed_methods=frozenset({"GET"}),respect_retry_after_header=True)
         self.session.mount("https://",HTTPAdapter(max_retries=retry,pool_connections=20,pool_maxsize=20))
-        self.session.headers.update({"User-Agent":"Terminal3-BloFin-MTF-Bot/2.0"})
+        self.session.headers.update({"User-Agent":"Terminal3-BloFin-MTF-Bot/2.1"})
 
     @staticmethod
     def _compact_json(body): return "" if body is None else json.dumps(body,separators=(",",":"),ensure_ascii=False)
@@ -68,6 +68,10 @@ class BloFinClient:
     def set_position_mode(self,position_mode="long_short_mode",multi_position=True):
         body={"positionMode":position_mode,"multiPosition":"true" if multi_position else "false"}
         return dict(self._request("POST","/api/v1/account/set-position-mode",body=body,private=True) or {})
+    def get_order_detail(self,inst_id="BTC-USDT",order_id="",client_order_id=""):
+        if not (order_id or client_order_id):raise ValueError("order_id or client_order_id is required")
+        d=self._request("GET","/api/v1/trade/order-detail",{"instId":inst_id,"orderId":order_id,"clientOrderId":client_order_id},private=True)
+        return dict(d or {})
     def set_leverage(self,inst_id,leverage,margin_mode,position_side="net",position_id=""):
         body={"instId":inst_id,"leverage":str(int(leverage) if float(leverage).is_integer() else leverage),"marginMode":margin_mode}
         if position_side in {"long","short"}:body["positionSide"]=position_side
