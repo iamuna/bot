@@ -6,7 +6,7 @@ import json
 import multiprocessing as mp
 import os
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
 from pathlib import Path
 
 import backtest_v24 as core
@@ -14,9 +14,10 @@ import backtest_progress_runner as progress
 from backtest_v24_guarded import GuardedBacktester
 import portfolio_cap
 
-# The user explicitly approved using the whole 8-core / 16-thread CPU for
-# historical research. We still preserve deterministic, time-ordered portfolio
-# replay; only independent work is spread across processes.
+# Aggressive research mode: use every logical CPU for work that is genuinely
+# independent. Time-ordered portfolio state is never split across candles,
+# because doing that would change the backtest. Independent BASE/GUARDED
+# replays are run concurrently instead.
 portfolio_cap.install()
 
 _RESAMPLE_BASE = None
@@ -190,10 +191,6 @@ def load_1m_parallel(path: Path, start_ms, end_ms, workers: int, layout=None, sh
     if usable <= 0:
         raise ValueError('CSV contains no data bytes')
 
-    # Split the physical CSV into independent byte ranges. Every worker opens
-    # the file independently, aligns to a complete line, parses only its range,
-    # and filters to the requested date window. This makes the formerly
-    # single-core historical loader use the whole CPU on plain CSV files.
     chunks = []
     for i in range(workers):
         a = data_start + usable * i // workers
@@ -292,6 +289,113 @@ def build_dataset_parallel(base, workers: int, show_progress: bool = True):
     return {tf: data[tf] for tf in core.TF_ORDER}
 
 
+def _replay_job(
+    kind: str,
+    base,
+    shared_data,
+    analysis_cache,
+    equity: float,
+    fee_bps: float,
+    slippage_bps: float,
+    leverage: float,
+    gross_cap_x: float,
+    portfolio_margin_pct: float,
+):
+    """Run one deterministic replay in its own process.
+
+    BASE and GUARDED are independent once the shared historical TA cache exists,
+    so running them simultaneously uses two CPU cores without changing either
+    strategy's chronological state transitions.
+    """
+    core.LEVERAGE = float(leverage)
+    portfolio_cap.PORTFOLIO_GROSS_NOTIONAL_X = float(gross_cap_x)
+    portfolio_cap.PORTFOLIO_MARGIN_USE_PCT = float(portfolio_margin_pct)
+    portfolio_cap.install()
+    cls = core.Backtester if kind == 'base' else GuardedBacktester
+    bt = progress._construct_with_shared_data(cls, base, shared_data, equity, fee_bps, slippage_bps)
+    report = progress.run_with_progress(
+        bt,
+        'BASE v2.4' if kind == 'base' else 'GUARDED v2.4',
+        show_progress=False,
+        analysis_cache=analysis_cache,
+    )
+    return kind, report
+
+
+def run_compare_replays_parallel(
+    base,
+    shared_data,
+    analysis_cache,
+    equity: float,
+    fee_bps: float,
+    slippage_bps: float,
+    leverage: float,
+    gross_cap_x: float,
+    portfolio_margin_pct: float,
+    show_progress: bool = True,
+):
+    """Run BASE and GUARDED concurrently and return both reports."""
+    ctx = mp.get_context('spawn')
+    started = time.perf_counter()
+    reports = {}
+    if show_progress:
+        print(
+            'Running BASE + GUARDED concurrently on 2 dedicated replay processes. '
+            'Each replay remains strictly time-ordered.',
+            flush=True,
+        )
+
+    with ProcessPoolExecutor(max_workers=2, mp_context=ctx) as pool:
+        futures = {
+            pool.submit(
+                _replay_job,
+                kind,
+                base,
+                shared_data,
+                analysis_cache,
+                equity,
+                fee_bps,
+                slippage_bps,
+                leverage,
+                gross_cap_x,
+                portfolio_margin_pct,
+            ): kind
+            for kind in ('base', 'guarded')
+        }
+        pending = set(futures)
+        last_print = 0.0
+        while pending:
+            done, _ = wait(pending, timeout=0.75, return_when=FIRST_COMPLETED)
+            now = time.perf_counter()
+            if show_progress and not done and now - last_print >= 0.75:
+                last_print = now
+                active = ', '.join(futures[f].upper() for f in pending)
+                print(
+                    '\r' + f'[PARALLEL REPLAY] elapsed={_fmt_seconds(now - started)}  active={active}'.ljust(120),
+                    end='', flush=True,
+                )
+            for fut in done:
+                pending.remove(fut)
+                kind, report = fut.result()
+                reports[kind] = report
+                if show_progress:
+                    print(
+                        '\r' + f'[PARALLEL REPLAY] {kind.upper()} finished in {_fmt_seconds(time.perf_counter() - started)}'.ljust(120),
+                        flush=True,
+                    )
+
+    return reports
+
+
+def _save_and_print(kind: str, report: dict, out: Path):
+    folder = 'base' if kind == 'base' else 'guarded'
+    label = 'BASE' if kind == 'base' else 'GUARDED'
+    j, c = core.save_report(report, out / folder)
+    print(f'{label} result:')
+    print(json.dumps(progress._summary(report), indent=2))
+    print(f'Report: {j}\nTrades: {c}\n', flush=True)
+
+
 def self_test() -> int:
     from tempfile import TemporaryDirectory
     from backtest_self_test import synthetic
@@ -317,12 +421,25 @@ def self_test() -> int:
         ds_serial = core.build_dataset(a)
         assert {tf: len(ds_parallel[tf]) for tf in core.TF_ORDER} == {tf: len(ds_serial[tf]) for tf in core.TF_ORDER}
 
-    print(f'FULL CPU SELF TEST OK: parallel CSV load + resample, logical CPUs={logical}')
+        # Exercise the same spawn-based concurrent replay path used on Windows.
+        cache = progress.build_analysis_cache_parallel(ds_parallel, workers=min(2, logical), show_progress=False)
+        reports = run_compare_replays_parallel(
+            a, ds_parallel, cache, 1000.0, 6.0, 1.0, 30.0, 3.15, 45.0,
+            show_progress=False,
+        )
+        assert set(reports) == {'base', 'guarded'}
+        assert reports['base']['start_equity'] == 1000.0
+        assert reports['guarded']['start_equity'] == 1000.0
+
+    print(
+        f'FULL CPU SELF TEST OK: parallel CSV load + resample + TA + concurrent replays, '
+        f'logical CPUs={logical}'
+    )
     return 0
 
 
 def main():
-    ap = argparse.ArgumentParser(description='Terminal 3 v2.4 full-CPU comparison runner')
+    ap = argparse.ArgumentParser(description='Terminal 3 v2.4 maximum-use CPU comparison runner')
     ap.add_argument('csv', nargs='?', help='1-minute BTC OHLCV CSV or ZIP containing one CSV')
     ap.add_argument('--equity', type=float, default=1000)
     ap.add_argument('--fee-bps', type=float, default=6.0)
@@ -336,6 +453,7 @@ def main():
     ap.add_argument('--gross-cap-x', type=float, default=3.15)
     ap.add_argument('--portfolio-margin-pct', type=float, default=45.0)
     ap.add_argument('--workers', type=int, default=0, help='0=all logical CPUs')
+    ap.add_argument('--serial-replays', action='store_true', help='debug option: do not run BASE/GUARDED concurrently')
     ap.add_argument('--self-test', action='store_true')
     a = ap.parse_args()
 
@@ -358,13 +476,17 @@ def main():
     portfolio_cap.PORTFOLIO_MARGIN_USE_PCT = float(a.portfolio_margin_pct)
 
     path = Path(a.csv)
-    print(f'FULL CPU MODE: {workers} worker processes / {os.cpu_count() or 1} logical CPUs available.', flush=True)
+    print(
+        f'MAXIMUM USE MODE: {workers} worker processes / {os.cpu_count() or 1} logical CPUs available. '
+        'All safely parallelizable work will use them.',
+        flush=True,
+    )
 
     range_started = time.perf_counter()
     if path.suffix.lower() == '.csv':
         print('Reading CSV first/last timestamps directly (no full-file scan)...', flush=True)
     else:
-        print('Scanning compressed data range (ZIP fallback is sequential)...', flush=True)
+        print('Scanning compressed data range (ZIP decompression itself is serial)...', flush=True)
     start_ms, end_ms, layout = resolve_time_range_fast(path, a.start, a.end, a.last_days)
     print(f'Data range resolved in {_fmt_seconds(time.perf_counter() - range_started)}.', flush=True)
 
@@ -384,25 +506,32 @@ def main():
     analysis_cache = progress.build_analysis_cache_parallel(shared_data, workers=workers, show_progress=True)
     out = Path(a.out)
 
-    # Portfolio replay itself is intentionally time-ordered: the next candle's
-    # positions/risk depend on the previous candle. Parallelizing one replay
-    # across time would change the strategy. The expensive independent work
-    # above uses all logical CPUs; BASE and GUARDED then consume the shared cache.
+    if a.mode == 'compare' and not a.serial_replays:
+        reports = run_compare_replays_parallel(
+            base,
+            shared_data,
+            analysis_cache,
+            a.equity,
+            a.fee_bps,
+            a.slippage_bps,
+            core.LEVERAGE,
+            portfolio_cap.PORTFOLIO_GROSS_NOTIONAL_X,
+            portfolio_cap.PORTFOLIO_MARGIN_USE_PCT,
+            show_progress=True,
+        )
+        _save_and_print('base', reports['base'], out)
+        _save_and_print('guarded', reports['guarded'], out)
+        return
+
     if a.mode in {'base', 'compare'}:
         base_bt = progress._construct_with_shared_data(core.Backtester, base, shared_data, a.equity, a.fee_bps, a.slippage_bps)
         base_report = progress.run_with_progress(base_bt, 'BASE v2.4', analysis_cache=analysis_cache)
-        j, c = core.save_report(base_report, out / 'base')
-        print('BASE result:')
-        print(json.dumps(progress._summary(base_report), indent=2))
-        print(f'Report: {j}\nTrades: {c}\n', flush=True)
+        _save_and_print('base', base_report, out)
 
     if a.mode in {'guarded', 'compare'}:
         guard_bt = progress._construct_with_shared_data(GuardedBacktester, base, shared_data, a.equity, a.fee_bps, a.slippage_bps)
         guard_report = progress.run_with_progress(guard_bt, 'GUARDED v2.4', analysis_cache=analysis_cache)
-        j, c = core.save_report(guard_report, out / 'guarded')
-        print('GUARDED result:')
-        print(json.dumps(progress._summary(guard_report), indent=2))
-        print(f'Report: {j}\nTrades: {c}', flush=True)
+        _save_and_print('guarded', guard_report, out)
 
 
 if __name__ == '__main__':
