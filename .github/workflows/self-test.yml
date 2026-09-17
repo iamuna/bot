@@ -24,5 +24,27 @@ jobs:
         run: python -m compileall -q .
       - name: Check dashboard JavaScript
         run: node --check static/app.js
-      - name: Run offline self-test
+      - name: Run bot self-test
         run: python self_test.py
+      - name: Run v2.4 backtester self-test
+        run: python backtest_self_test.py
+      - name: Run v2.4 guarded protection self-test
+        run: python backtest_guard_self_test.py
+      - name: Run v2.4 selective protection self-test
+        run: python backtest_selective_self_test.py
+      - name: Run v2.4 efficiency self-test
+        run: python backtest_efficiency_self_test.py
+      - name: Run v2.4 OOS battery self-test
+        run: python backtest_oos_self_test.py
+      - name: Run v2.4 progress runner self-test
+        run: python backtest_progress_self_test.py
+      - name: Run v2.4 portfolio cap self-test
+        run: python portfolio_cap_self_test.py
+      - name: Run v2.4 full CPU pipeline self-test
+        run: python backtest_full_cpu_runner.py --self-test
+      - name: Run v2.4 launcher self-test
+        run: python launcher_v24.py --self-test
+      - name: Run v2.4 OOS launcher self-test
+        run: python launcher_oos_v242.py --self-test
+      - name: Run v2.4 final holdout launcher self-test
+        run: python launcher_final_holdout_v242.py --self-test
