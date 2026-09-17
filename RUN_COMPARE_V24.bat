@@ -30,6 +30,8 @@ if not exist "%INPUT%" goto :file_missing
 
 set "DAYS=%~2"
 if not defined DAYS set "DAYS=180"
+set "LEVERAGE=%~3"
+if not defined LEVERAGE set "LEVERAGE=30"
 
 set "PY=.venv\Scripts\python.exe"
 if exist "%PY%" goto :deps
@@ -58,15 +60,20 @@ echo.
 echo Data file:
 echo "%INPUT%"
 echo Research window: most recent %DAYS% days
+echo Leverage setting: %LEVERAGE%x
+echo Gross exposure cap: 3.15x account equity
+echo Portfolio margin budget: 45%% of account equity
 echo Fee assumption: 6 bps per side
 echo Slippage assumption: 1 bp per side
+echo NOTE: liquidation mechanics are not modeled in this research pass.
 echo.
 >>"%LOG%" echo Input: %INPUT%
 >>"%LOG%" echo Days: %DAYS%
+>>"%LOG%" echo Leverage: %LEVERAGE%x
 
 echo Starting comparison. Progress will update about once per second.
 echo.
-"%PY%" -u backtest_progress_runner.py "%INPUT%" --last-days %DAYS% --fee-bps 6 --slippage-bps 1 --out backtest_results --mode compare
+"%PY%" -u backtest_progress_runner.py "%INPUT%" --last-days %DAYS% --fee-bps 6 --slippage-bps 1 --leverage %LEVERAGE% --gross-cap-x 3.15 --portfolio-margin-pct 45 --out backtest_results --mode compare
 if errorlevel 1 goto :compare_fail
 
 echo.
