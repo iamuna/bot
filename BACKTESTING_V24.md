@@ -20,6 +20,18 @@ The engine reuses the Terminal 3 technical-analysis logic and builds the full 30
 - realistic entry/exit fees and configurable slippage;
 - per-timeframe performance and rejection logging.
 
+The final v2.3 paper baseline is recorded in `V23_PAPER_BASELINE_20260917.md`.
+
+## Report-driven guarded variant
+
+`backtest_v24_guarded.py` adds three experimental protections on top of the base v2.4 engine so they can be A/B tested instead of blindly merged into the live bot:
+
+1. **Cost-adjusted target gate.** A trade can be rejected if its planned target does not retain a configurable minimum net R after estimated round-trip fees and slippage.
+2. **Equity high-water profit guard.** Once equity has made a meaningful gain, new-position risk is progressively reduced as a larger share of the accumulated peak profit is surrendered. The current research tiers are 20% / 35% / 50% / 65% giveback with risk multipliers 1.00 / 0.75 / 0.50 / 0.25 / 0.10 beyond the final tier.
+3. **Loss-cluster throttle.** New risk is reduced after 3, 5 and 7 consecutive losing closes instead of continuing at full size through a regime transition.
+
+These thresholds are hypotheses created from the first v2.3 paper run. They are deliberately configurable and must be validated on broad history and untouched out-of-sample periods before any live use.
+
 ## Look-ahead protection
 
 Signals are created only after a timeframe candle has fully closed. Orders are entered at the **next 1-minute candle open**, with configurable adverse slippage. Higher-timeframe analysis only sees candles that were closed at that historical moment.
@@ -55,10 +67,16 @@ or run:
 RUN_BACKTEST_V24.bat C:\data\btc_1m.csv
 ```
 
-Direct Python usage:
+Base adaptive engine:
 
 ```bash
-python backtest_v24.py btc_1m.csv --equity 1000 --fee-bps 5 --slippage-bps 1
+python backtest_v24.py btc_1m.csv --equity 1000 --fee-bps 6 --slippage-bps 1
+```
+
+Guarded report-driven variant:
+
+```bash
+python backtest_v24_guarded.py btc_1m.csv --equity 1000 --fee-bps 6 --slippage-bps 1 --min-net-target-r 0.75 --profit-guard-activation 3
 ```
 
 Results are written to `backtest_results/` as JSON plus a trade-level CSV.
