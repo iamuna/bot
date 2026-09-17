@@ -53,10 +53,54 @@ def _construct_with_shared_data(cls, base, shared_data, equity, fee_bps, slippag
         core.build_dataset = original
 
 
+def _bankruptcy_snapshot(bt, price: float, t: int, processed: int, total: int) -> dict:
+    """Create an explicit account-failure record when MTM equity is exhausted.
+
+    Liquidation mechanics are not yet modeled, so zero MTM equity is treated as
+    an economic stop rather than allowing impossible negative-capital trading.
+    """
+    mtm = float(bt._mark_to_market(float(price)))
+    return {
+        'bankrupt': True,
+        'status': 'BANKRUPT',
+        'bankruptcy_t': int(t),
+        'bankruptcy_mtm_equity': round(mtm, 6),
+        'realized_equity_at_bankruptcy': round(float(bt.equity), 6),
+        'open_positions_at_bankruptcy': len(bt.positions),
+        'processed_candles': int(processed),
+        'processed_pct': round(100.0 * processed / total, 4) if total else 100.0,
+        'economic_end_equity': 0.0,
+    }
+
+
+def _finalize_report(bt, bankruptcy: dict | None, processed: int, total: int) -> dict:
+    r = bt.report()
+    if bankruptcy is None:
+        r.update({
+            'bankrupt': False,
+            'status': 'COMPLETE',
+            'processed_candles': int(processed),
+            'processed_pct': round(100.0 * processed / total, 4) if total else 100.0,
+            'economic_end_equity': round(float(r.get('end_equity', bt.equity)), 2),
+        })
+        return r
+
+    # Once MTM equity is exhausted, the economically meaningful account value
+    # is zero. Do not continue sizing trades from negative/invalid capital.
+    r.update(bankruptcy)
+    r['end_equity'] = 0.0
+    r['return_pct'] = -100.0
+    r['net_pnl'] = round(-float(bt.start_equity), 2)
+    r['max_drawdown_pct'] = max(100.0, float(r.get('max_drawdown_pct') or 0.0))
+    return r
+
+
 def run_with_progress(bt, label: str, show_progress: bool = True, refresh_seconds: float = 1.0):
     total = len(bt.base)
     started = time.perf_counter()
     last_print = 0.0
+    bankruptcy = None
+    processed = 0
 
     def emit(done: int, force: bool = False):
         nonlocal last_print
@@ -94,15 +138,43 @@ def run_with_progress(bt, label: str, show_progress: bool = True, refresh_second
             f'effective gross cap={portfolio_cap.effective_gross_cap_x():.2f}x.',
             flush=True,
         )
-        print('Liquidation mechanics are not modeled in this research pass.', flush=True)
+        print('Liquidation mechanics are not modeled; MTM equity <= $0 stops the simulation as BANKRUPT.', flush=True)
     emit(0, force=True)
 
     for n, bar in enumerate(bt.base, 1):
+        # If the previous candle already exhausted capital, do not process
+        # another candle or permit any new position sizing.
+        opening_mtm = float(bt._mark_to_market(float(bar['o'])))
+        if opening_mtm <= 0:
+            bankruptcy = _bankruptcy_snapshot(bt, float(bar['o']), int(bar['t']), n - 1, total)
+            processed = n - 1
+            emit(processed, force=True)
+            break
+
         bt._manage(bar)
+        processed = n
+
+        # Existing positions can exhaust the account during this candle.
+        after_manage_mtm = float(bt._mark_to_market(float(bar['c'])))
+        if after_manage_mtm <= 0:
+            bankruptcy = _bankruptcy_snapshot(bt, float(bar['c']), int(bar['ct']), n, total)
+            bt._update_dd(float(bar['c']))
+            emit(n, force=True)
+            break
+
         if bt.pending:
             for c in sorted(bt.pending, key=lambda x: x.priority, reverse=True):
                 bt._open_candidate(c, bar)
+                # Entry fees/slippage can also consume the remaining capital.
+                entry_mtm = float(bt._mark_to_market(float(bar['o'])))
+                if entry_mtm <= 0:
+                    bankruptcy = _bankruptcy_snapshot(bt, float(bar['o']), int(bar['t']), n, total)
+                    break
             bt.pending = []
+            if bankruptcy is not None:
+                bt._update_dd(float(bar['o']))
+                emit(n, force=True)
+                break
 
         current_ct = int(bar['ct'])
         fresh = []
@@ -132,28 +204,46 @@ def run_with_progress(bt, label: str, show_progress: bool = True, refresh_second
             bt.prev_score[tf] = float((bt.analyses.get(tf) or {}).get('score', 0))
         bt.pending = fresh
         bt._update_dd(float(bar['c']))
+
+        closing_mtm = float(bt._mark_to_market(float(bar['c'])))
+        if closing_mtm <= 0:
+            bankruptcy = _bankruptcy_snapshot(bt, float(bar['c']), int(bar['ct']), n, total)
+            emit(n, force=True)
+            break
+
         emit(n)
 
-    last = bt.base[-1]
-    for p in list(bt.positions):
-        bt._close(p, float(last['c']), 'end_of_test', int(last['ct']))
+    if bankruptcy is None:
+        last = bt.base[-1]
+        for p in list(bt.positions):
+            bt._close(p, float(last['c']), 'end_of_test', int(last['ct']))
+        processed = total
+        emit(total, force=True)
+    else:
+        if show_progress:
+            print(
+                f'\n*** {label} BANKRUPT at {bankruptcy["processed_pct"]:.2f}% of the test '
+                f'(MTM equity={bankruptcy["bankruptcy_mtm_equity"]:.2f}). '
+                f'Remaining candles skipped. ***',
+                flush=True,
+            )
 
-    emit(total, force=True)
     if show_progress:
         print()
-    return bt.report()
+    return _finalize_report(bt, bankruptcy, processed, total)
 
 
 def _summary(report):
     keys = [
-        'start_equity', 'end_equity', 'return_pct', 'trades', 'win_rate_pct',
-        'profit_factor', 'max_drawdown_pct', 'avg_r', 'fees_paid', 'rejections',
-        'leverage', 'portfolio_margin_cap_pct', 'portfolio_gross_notional_cap_x',
-        'effective_gross_cap_x', 'max_gross_notional_x_equity',
-        'max_margin_used_pct', 'portfolio_cap_rejections',
-        'portfolio_cap_scaled_entries', 'liquidation_modeled',
-        'peak_equity', 'profit_giveback_pct', 'cost_rejections',
-        'risk_throttled_entries', 'max_loss_streak',
+        'status', 'bankrupt', 'bankruptcy_t', 'bankruptcy_mtm_equity',
+        'processed_pct', 'start_equity', 'end_equity', 'return_pct', 'trades',
+        'win_rate_pct', 'profit_factor', 'max_drawdown_pct', 'avg_r',
+        'fees_paid', 'rejections', 'leverage', 'portfolio_margin_cap_pct',
+        'portfolio_gross_notional_cap_x', 'effective_gross_cap_x',
+        'max_gross_notional_x_equity', 'max_margin_used_pct',
+        'portfolio_cap_rejections', 'portfolio_cap_scaled_entries',
+        'liquidation_modeled', 'peak_equity', 'profit_giveback_pct',
+        'cost_rejections', 'risk_throttled_entries', 'max_loss_streak',
     ]
     return {k: report.get(k) for k in keys if k in report}
 
