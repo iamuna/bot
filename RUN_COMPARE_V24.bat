@@ -9,37 +9,24 @@ set "LOG=%~dp0backtest_launcher.log"
 
 echo ========================================
 echo Terminal 3.0 v2.4 Backtest Comparison
-echo Base vs Guarded
+echo Base vs Guarded - Live Progress + ETA
 echo ========================================
 echo.
 
 set "INPUT=%~1"
-if defined INPUT goto :input_ready
+if not defined INPUT goto :ask_input
+goto :have_input
 
+:ask_input
 echo No data file was passed to the launcher.
 echo.
-echo Paste the full path below, or drag the ZIP into this window, then press Enter.
+echo Paste the full path below, or drag the ZIP into this window.
 set /p "INPUT=BTC 1-minute CSV/ZIP path: "
+if not defined INPUT goto :no_input
+if "%INPUT:~0,1%"=="^"" set "INPUT=%INPUT:~1,-1%"
 
-rem This line is intentionally OUTSIDE a parenthesized block. CMD expands
-rem percent variables before executing a block, which broke the previous prompt.
-set "INPUT=%INPUT:"=%"
-
-:input_ready
-if not defined INPUT (
-  echo.
-  echo ERROR: No input file selected.
-  >>"%LOG%" echo ERROR: No input file selected.
-  goto :finish_fail
-)
-
-if not exist "%INPUT%" (
-  echo.
-  echo ERROR: File not found:
-  echo "%INPUT%"
-  >>"%LOG%" echo ERROR: File not found: %INPUT%
-  goto :finish_fail
-)
+:have_input
+if not exist "%INPUT%" goto :file_missing
 
 set "DAYS=%~2"
 if not defined DAYS set "DAYS=180"
@@ -77,14 +64,10 @@ echo.
 >>"%LOG%" echo Input: %INPUT%
 >>"%LOG%" echo Days: %DAYS%
 
-echo Running BASE v2.4 backtest...
-"%PY%" backtest_v24.py "%INPUT%" --last-days %DAYS% --fee-bps 6 --slippage-bps 1 --out backtest_results\base
-if errorlevel 1 goto :base_fail
-
+echo Starting comparison. Progress will update about once per second.
 echo.
-echo Running GUARDED v2.4 backtest on the same data...
-"%PY%" backtest_v24_guarded.py "%INPUT%" --last-days %DAYS% --fee-bps 6 --slippage-bps 1 --out backtest_results\guarded
-if errorlevel 1 goto :guard_fail
+"%PY%" -u backtest_progress_runner.py "%INPUT%" --last-days %DAYS% --fee-bps 6 --slippage-bps 1 --out backtest_results --mode compare
+if errorlevel 1 goto :compare_fail
 
 echo.
 echo ========================================
@@ -94,6 +77,19 @@ echo Guarded results: backtest_results\guarded\
 echo ========================================
 >>"%LOG%" echo SUCCESS: both backtests completed
 goto :finish_ok
+
+:no_input
+echo.
+echo ERROR: No input file selected.
+>>"%LOG%" echo ERROR: No input file selected.
+goto :finish_fail
+
+:file_missing
+echo.
+echo ERROR: File not found:
+echo "%INPUT%"
+>>"%LOG%" echo ERROR: File not found: %INPUT%
+goto :finish_fail
 
 :python_missing
 echo.
@@ -114,16 +110,10 @@ echo ERROR: Python requirements failed to install.
 >>"%LOG%" echo ERROR: pip install failed
 goto :finish_fail
 
-:base_fail
+:compare_fail
 echo.
-echo ERROR: BASE v2.4 backtest failed.
->>"%LOG%" echo ERROR: base backtest failed
-goto :finish_fail
-
-:guard_fail
-echo.
-echo ERROR: GUARDED v2.4 backtest failed.
->>"%LOG%" echo ERROR: guarded backtest failed
+echo ERROR: v2.4 comparison failed.
+>>"%LOG%" echo ERROR: comparison failed
 goto :finish_fail
 
 :finish_ok
