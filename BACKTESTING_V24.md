@@ -32,6 +32,31 @@ The final v2.3 paper baseline is recorded in `V23_PAPER_BASELINE_20260917.md`.
 
 These thresholds are hypotheses created from the first v2.3 paper run. They are deliberately configurable and must be validated on broad history and untouched out-of-sample periods before any live use.
 
+## Portfolio exposure and leverage
+
+Leverage is now an explicit research parameter rather than a hard-coded strategy assumption. The Windows comparison launcher currently defaults to **30x** because we want to test whether higher leverage improves margin efficiency, but leverage is separated from market exposure.
+
+The default portfolio envelope is:
+
+- maximum gross BTC notional: **3.15x marked-to-market account equity** across all simultaneous positions combined;
+- maximum initial-margin budget: **45% of marked-to-market account equity** across the portfolio;
+- maximum planned open stop-risk: **11.5% of equity**;
+- maximum positions: **10**.
+
+The effective gross entry cap is the smaller of the explicit 3.15x gross cap and the notional that can be supported by the margin budget at the selected leverage. This means raising the leverage setting from 7x to 30x does **not** automatically raise allowed market exposure from 3.15x to 13.5x. At 30x, a fully used 3.15x gross envelope requires about 10.5% initial margin, leaving the rest of the account outside the initial-margin allocation.
+
+This design lets the research isolate leverage as a margin-efficiency variable rather than confusing leverage with risk sizing. Position risk is still determined primarily by stop distance, timeframe budget, quality, regime, existing correlated risk and portfolio caps.
+
+The comparison runner accepts:
+
+```bash
+python backtest_progress_runner.py btc_1m.zip --last-days 180 --leverage 30 --gross-cap-x 3.15 --portfolio-margin-pct 45
+```
+
+The runner currently restricts the research leverage setting to 1x-30x. That is a project research limit, not a claim about the exchange's maximum leverage.
+
+**Important:** liquidation mechanics are not yet modeled. A leverage result must not be interpreted as live-safe until exchange-specific maintenance-margin tiers, margin mode and liquidation behavior are added and tested.
+
 ## Look-ahead protection
 
 Signals are created only after a timeframe candle has fully closed. Orders are entered at the **next 1-minute candle open**, with configurable adverse slippage. Higher-timeframe analysis only sees candles that were closed at that historical moment.
@@ -40,9 +65,11 @@ If a 1-minute candle touches both a stop and a target, the simulator takes the c
 
 ## Input format
 
-Use a chronological or unsorted one-minute BTC OHLCV CSV. The loader accepts common column names such as:
+Use a chronological or unsorted one-minute BTC OHLCV CSV. ZIP files containing one CSV are also accepted. The loader accepts common column names such as:
 
 `timestamp, open, high, low, close, volume`
+
+and Binance-style headers such as `Open time` and `Quote asset volume`.
 
 Timestamps may be Unix seconds, Unix milliseconds, or ISO-8601 strings.
 
@@ -57,17 +84,19 @@ For meaningful 1m/3m research, use a large continuous dataset. Longer history al
 
 ## Run on Windows
 
-Drag the CSV onto:
+For the current base-vs-guarded comparison with progress and ETA, run:
 
-`RUN_BACKTEST_V24.bat`
+`RUN_COMPARE_V24.bat`
 
-or run:
+The launcher asks for the BTC CSV/ZIP. Optional command-line arguments are data path, number of days and leverage, for example:
 
 ```bat
-RUN_BACKTEST_V24.bat C:\data\btc_1m.csv
+RUN_COMPARE_V24.bat C:\data\BTCUSD_1m_Binance.zip 180 30
 ```
 
-Base adaptive engine:
+The default comparison assumptions are 180 days, 30x leverage setting, 3.15x gross portfolio cap, 45% portfolio margin budget, 6 bps fee per side and 1 bp slippage per side.
+
+Direct base adaptive engine:
 
 ```bash
 python backtest_v24.py btc_1m.csv --equity 1000 --fee-bps 6 --slippage-bps 1
@@ -78,6 +107,8 @@ Guarded report-driven variant:
 ```bash
 python backtest_v24_guarded.py btc_1m.csv --equity 1000 --fee-bps 6 --slippage-bps 1 --min-net-target-r 0.75 --profit-guard-activation 3
 ```
+
+For the portfolio-cap/leverage model, use `backtest_progress_runner.py` / `RUN_COMPARE_V24.bat`; the direct legacy entry points do not install the portfolio-cap research layer.
 
 Results are written to `backtest_results/` as JSON plus a trade-level CSV.
 
@@ -109,6 +140,8 @@ These are research parameters, not claims that they are optimal.
 ## Important limitations
 
 This backtester is deliberately conservative but still cannot reproduce exchange microstructure perfectly. It does not yet reconstruct historical funding payments, order-book depth, partial fills, liquidation mechanics, exchange outages, or queue priority. Its fee/slippage assumptions should therefore be stress-tested rather than treated as exact.
+
+The Binance history used for the first comparison is useful for strategy A/B research, but eventual validation should use perpetual-market data and historical funding if available because the live target is a perpetual futures market.
 
 The purpose is to compare strategy variants under identical historical conditions, not to promise future returns.
 
