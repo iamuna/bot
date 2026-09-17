@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
-title Terminal 3 v2.5B Final Untouched Early Validation
+title Terminal 3 v2.5B Historical Holdout Reproduction
 
 set "PY=.venv\Scripts\python.exe"
 if exist "%PY%" goto :deps
@@ -25,11 +25,10 @@ echo Installing/checking Python requirements...
 if errorlevel 1 goto :pip_fail
 
 echo.
-echo Terminal 3 v2.5B FINAL UNTOUCHED EARLY VALIDATION
-echo Strategy is frozen: 2h+ entries, same costs/risk/exits/caps.
-echo Warm-up is frozen at 90 days.
-echo This run only uses BTC candles strictly earlier than the original v2.5
-echo research-history boundary. After this run, that early segment is consumed.
+echo Terminal 3 v2.5B HISTORICAL HOLDOUT REPRODUCTION
+echo The original untouched validation has already been completed and recorded.
+echo This rerun is for reproducibility only; it is NOT new blind validation.
+echo All result-affecting settings are hard-locked to the frozen v2.5B protocol.
 echo.
 
 if "%~1"=="" (
@@ -58,8 +57,8 @@ set "RC=1"
 
 :finish
 echo.
-if "%RC%"=="0" echo v2.5B final validation finished successfully.
-if not "%RC%"=="0" echo v2.5B final validation stopped with error code %RC%.
+if "%RC%"=="0" echo v2.5B holdout reproduction finished successfully.
+if not "%RC%"=="0" echo v2.5B holdout reproduction stopped with error code %RC%.
 echo Results folder: backtest_results_v25b_final_validation
 echo.
 pause
