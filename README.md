@@ -20,9 +20,9 @@ The strategy is now frozen while warm-up methodology is checked. Run:
 
 `RUN_V25_STABILITY_90D.bat`
 
-That repeats the same 14 known research windows with a 90-day no-trade warm-up and does **not** touch the final reserved historical holdout. Results are written to `backtest_results_v25b_stability_90d/`.
+That reruns **13 already-seen research windows** with a 90-day no-trade warm-up. The oldest research window is deliberately omitted so the stability check cannot load BTC history earlier than the original research run already used. Results are written to `backtest_results_v25b_stability_90d/`.
 
-The original 60-day candidate-B run remains reproducible with:
+The original 14-window/60-day candidate-B run remains reproducible with:
 
 `RUN_V25_RESEARCH.bat`
 
@@ -36,7 +36,7 @@ Research assumptions currently used by the candidate:
 - 0.16R maximum modeled round-trip friction
 - 2h minimum entry timeframe
 
-The inspected 2018-2025 windows are research data. They are not blind validation data anymore. One older 180-day holdout remains reserved.
+The inspected 2018-2025 windows are research data. The original idea of a full untouched 180-day holdout immediately before the oldest research window was corrected: its final 60 days had already been used as indicator warm-up. The cleanest untouched historical segment is therefore the earlier data before the original research-history boundary, and the final validation interval will be defined there only after warm-up methodology is frozen.
 
 ## Production bot
 
@@ -66,7 +66,7 @@ Research/backtesting:
 - `backtest_v24_selective.py` — anti-churn/rolling-edge layer
 - `backtest_v24_efficient.py` — 15m+ efficient baseline used by v2.5
 - `backtest_v25.py` — current frozen 2h+ candidate
-- `backtest_v25_research.py` — 14-window research/stability battery
+- `backtest_v25_research.py` — locked research/stability battery
 - `backtest_oos_v242.py` — shared window-planning/report helpers
 - `backtest_full_cpu_runner.py`, `backtest_progress_runner.py` — reusable parallel data/analysis helpers
 - `portfolio_cap.py` — shared exposure/margin-cap layer
@@ -75,7 +75,7 @@ Historical one-off launchers and obsolete v2.1/v2.4 instructions are intentional
 
 ## Validation notes
 
-The v2.4.2 frozen candidate finished effectively around breakeven across the inspected OOS + holdout windows after modeled costs. Candidate v2.5A also remained effectively breakeven. v2.5B is the first candidate with a meaningfully positive research margin, but it is still execution-sensitive and has not yet consumed its final blind holdout.
+The v2.4.2 frozen candidate finished effectively around breakeven across the inspected OOS + holdout windows after modeled costs. Candidate v2.5A also remained effectively breakeven. v2.5B is the first candidate with a meaningfully positive research margin, but it is still execution-sensitive and has not yet received a clean final validation run on untouched early data.
 
 The current research gate is documented in `docs/V25_RESEARCH_PLAN.md`.
 
