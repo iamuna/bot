@@ -28,3 +28,5 @@ jobs:
         run: python self_test.py
       - name: Run v2.4 backtester self-test
         run: python backtest_self_test.py
+      - name: Run v2.4 guarded protection self-test
+        run: python backtest_guard_self_test.py
