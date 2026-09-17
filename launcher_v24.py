@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import traceback
@@ -24,6 +25,21 @@ def positive_number(raw: str, name: str) -> str:
     return str(int(value)) if value.is_integer() else str(value)
 
 
+def positive_integer(raw: str, name: str) -> str:
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'{name} must be a whole number, got: {raw!r}') from exc
+    if value <= 0:
+        raise ValueError(f'{name} must be greater than zero, got: {raw!r}')
+    return str(value)
+
+
+def default_workers() -> int:
+    logical = max(1, int(os.cpu_count() or 1))
+    return max(1, min(8, logical // 2 if logical >= 4 else logical))
+
+
 def append_log(log_path: Path, text: str) -> None:
     with log_path.open('a', encoding='utf-8') as f:
         f.write(text.rstrip() + '\n')
@@ -35,13 +51,15 @@ def self_test() -> int:
     assert positive_number('180', 'days') == '180'
     assert positive_number('30', 'leverage') == '30'
     assert positive_number('7.5', 'leverage') == '7.5'
+    assert positive_integer('8', 'workers') == '8'
+    assert default_workers() >= 1
     try:
         positive_number('0', 'days')
     except ValueError:
         pass
     else:
         raise AssertionError('zero must be rejected')
-    print('V2.4 LAUNCHER SELF TEST OK: quoted paths and numeric arguments')
+    print('V2.4 LAUNCHER SELF TEST OK: quoted paths, numeric arguments, and CPU worker selection')
     return 0
 
 
@@ -77,24 +95,27 @@ def main(argv: list[str] | None = None) -> int:
 
         days = positive_number(argv[1] if len(argv) >= 2 and argv[1] else '180', 'days')
         leverage = positive_number(argv[2] if len(argv) >= 3 and argv[2] else '30', 'leverage')
+        workers = positive_integer(argv[3] if len(argv) >= 4 and argv[3] else str(default_workers()), 'workers')
 
         append_log(log_path, f'Input: {input_path}')
         append_log(log_path, f'Days: {days}')
         append_log(log_path, f'Leverage: {leverage}x')
+        append_log(log_path, f'TA workers: {workers}')
 
         print('\n========================================')
         print('Terminal 3.0 v2.4 Backtest Comparison')
-        print('Base vs Guarded - Live Progress + ETA')
+        print('Base vs Guarded - Multi-Core + Live ETA')
         print('========================================')
         print(f'Data file: {input_path}')
         print(f'Research window: most recent {days} days')
         print(f'Leverage setting: {leverage}x')
+        print(f'TA CPU workers: {workers}')
         print('Gross exposure cap: 3.15x account equity')
         print('Portfolio margin budget: 45% of account equity')
         print('Fee assumption: 6 bps per side')
         print('Slippage assumption: 1 bp per side')
         print('NOTE: liquidation mechanics are not modeled in this research pass.')
-        print('\nStarting comparison. Progress will update about once per second.\n', flush=True)
+        print('\nStarting comparison. The TA precompute stage should use multiple CPU cores.\n', flush=True)
 
         cmd = [
             sys.executable,
@@ -107,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             '--leverage', leverage,
             '--gross-cap-x', '3.15',
             '--portfolio-margin-pct', '45',
+            '--workers', workers,
             '--out', 'backtest_results',
             '--mode', 'compare',
         ]
