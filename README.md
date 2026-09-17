@@ -33,6 +33,12 @@ No numeric pass/fail threshold had been pre-registered for that gate, so the res
 
 The **current gate is a continuous chronological replay over the full available BTC history** with one initial 90-day no-trade warm-up and no periodic state resets. This is a historical audit, not a new blind validation test.
 
+Run on Windows:
+
+`RUN_V25_CHRONOLOGICAL.bat`
+
+It prompts for the BTC 1-minute CSV, hard-locks the frozen v2.5B settings, shows progress/ETA, and writes aggregate plus calendar-year results to `backtest_results_v25b_chronological/`. Full-history replay can take several hours.
+
 Research assumptions currently used by the frozen candidate:
 
 - 6 bps fee per side
@@ -49,6 +55,7 @@ The original research/stability launchers remain reproducible with:
 - `RUN_V25_RESEARCH.bat` — original 14-window/60-day candidate-B research battery
 - `RUN_V25_STABILITY_90D.bat` — safe 13-window/90-day stability battery
 - `RUN_V25_FINAL_VALIDATION.bat` — historical reproduction of the now-consumed early holdout; future reruns are not new blind validation
+- `RUN_V25_CHRONOLOGICAL.bat` — current full-history continuous historical audit
 
 ## Production bot
 
@@ -80,6 +87,7 @@ Research/backtesting:
 - `backtest_v25.py` — frozen 2h+ candidate
 - `backtest_v25_research.py` — locked research/stability battery
 - `backtest_v25_final_validation.py` — consumed early-holdout validation/reproduction runner
+- `backtest_v25_chronological.py` — frozen full-history continuous audit runner
 - `backtest_oos_v242.py` — shared window-planning/report helpers
 - `backtest_full_cpu_runner.py`, `backtest_progress_runner.py` — reusable parallel data/analysis helpers
 - `portfolio_cap.py` — shared exposure/margin-cap layer
