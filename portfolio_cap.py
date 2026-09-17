@@ -3,25 +3,30 @@ from __future__ import annotations
 """Portfolio-wide exposure limits for the v2.4 research backtester.
 
 The original v2.4 engine applied the 45% margin allowance independently to
-one candidate at a time.  With several simultaneous BTC positions that could
+one candidate at a time. With several simultaneous BTC positions that could
 allow gross exposure to stack far beyond the intended account-level envelope.
 
 This module patches the research Backtester at runtime so BOTH base v2.4 and
 guarded v2.4 share one account-wide exposure budget:
 
-* total initial-margin budget: 45% of current marked-to-market equity
-* total gross-notional budget: 3.15x current marked-to-market equity
+* total initial-margin budget: configurable, 45% of current MTM equity by default
+* total gross-notional budget: configurable, 3.15x current MTM equity by default
 
-3.15x is the original 7x * 45% envelope, now deliberately decoupled from the
-leverage setting.  If leverage is later raised (for example to 30x), leverage
-can improve margin efficiency but cannot automatically increase gross market
-exposure beyond 3.15x equity.
+The explicit gross cap is deliberately decoupled from the leverage setting.
+Raising leverage can improve margin efficiency, but it cannot automatically
+increase market exposure. The effective entry cap is the smaller of the gross
+cap and the exposure supportable by the portfolio margin budget at the chosen
+leverage.
 
-The limit is enforced when NEW positions are opened.  Existing positions are
+The limit is enforced when NEW positions are opened. Existing positions are
 not forcibly liquidated merely because market movement later changes the
 notional/equity ratio; instead, no additional exposure can be added while the
-portfolio is above the entry cap.  Forced deleveraging is a separate strategy
+portfolio is above the entry cap. Forced deleveraging is a separate strategy
 choice and should be tested explicitly rather than hidden inside sizing.
+
+Liquidation mechanics are NOT modeled here. That requires exchange-specific
+maintenance-margin tiers and margin-mode assumptions and must be added before
+using leverage results as evidence for live trading.
 """
 
 import backtest_v24 as core
@@ -48,6 +53,7 @@ def gross_notional(bt, price: float) -> float:
 def _ensure_stats(bt) -> None:
     if not hasattr(bt, 'portfolio_cap_rejections'):
         bt.portfolio_cap_rejections = 0
+        bt.portfolio_cap_scaled_entries = 0
         bt.max_gross_notional = 0.0
         bt.max_gross_notional_x_equity = 0.0
         bt.max_margin_used_pct = 0.0
@@ -101,23 +107,30 @@ def _patched_open_candidate(self, c, bar):
     target = c.target_ref + shift
     dist = abs(entry - stop)
 
+    # Size risk from current marked-to-market equity rather than stale realized
+    # equity. This reduces new risk automatically while existing positions are
+    # underwater and avoids increasing risk against unrealized losses.
+    equity_before = float(self._mark_to_market(mark))
+    if equity_before <= 0:
+        self.portfolio_cap_rejections += 1
+        self.rejections.append({'t': bar['t'], 'tf': c.tf, 'side': c.side, 'reason': 'portfolio exposure cap'})
+        return
+
     rp = self._risk_pct(c)
-    risk_budget = self.equity * rp / 100.0
+    risk_budget = equity_before * rp / 100.0
     risk_qty = risk_budget / max(dist, 1e-9)
 
-    # Portfolio cap is based on CURRENT marked-to-market equity and GROSS
-    # exposure, so opposite-side BTC positions cannot cancel each other out.
-    equity_before = float(self._mark_to_market(mark))
+    # Portfolio cap uses GROSS exposure, so opposite-side BTC positions cannot
+    # cancel each other out for capacity purposes.
     existing_gross = gross_notional(self, mark)
     cap_x = effective_gross_cap_x()
-
-    if equity_before <= 0 or cap_x <= 0:
+    if cap_x <= 0:
         self.portfolio_cap_rejections += 1
         self.rejections.append({'t': bar['t'], 'tf': c.tf, 'side': c.side, 'reason': 'portfolio exposure cap'})
         return
 
     # Account for the immediate entry fee AND adverse entry slippage when
-    # solving the maximum new quantity.  This prevents the act of entering the
+    # solving the maximum new quantity. This prevents the act of entering the
     # trade from pushing post-entry MTM equity below the exposure budget.
     fee_rate = self.fee_bps / 10000.0
     entry_cost_per_qty = entry * fee_rate + abs(entry - mark)
@@ -130,9 +143,11 @@ def _patched_open_candidate(self, c, bar):
         self.portfolio_cap_rejections += 1
         self.rejections.append({'t': bar['t'], 'tf': c.tf, 'side': c.side, 'reason': 'portfolio exposure cap'})
         return
+    if exposure_qty + 1e-12 < risk_qty:
+        self.portfolio_cap_scaled_entries += 1
 
     risk = qty * dist
-    if self._open_risk() + risk > self.equity * core.MAX_OPEN_RISK_PCT / 100.0:
+    if self._open_risk() + risk > equity_before * core.MAX_OPEN_RISK_PCT / 100.0:
         self.rejections.append({'t': bar['t'], 'tf': c.tf, 'side': c.side, 'reason': 'portfolio risk cap'})
         return
 
@@ -161,7 +176,9 @@ def _patched_report(self):
         'portfolio_gross_notional_cap_x': PORTFOLIO_GROSS_NOTIONAL_X,
         'effective_gross_cap_x': round(effective_gross_cap_x(), 4),
         'leverage': float(core.LEVERAGE),
+        'liquidation_modeled': False,
         'portfolio_cap_rejections': int(self.portfolio_cap_rejections),
+        'portfolio_cap_scaled_entries': int(self.portfolio_cap_scaled_entries),
         'max_gross_notional': round(float(self.max_gross_notional), 2),
         'max_gross_notional_x_equity': round(float(self.max_gross_notional_x_equity), 4),
         'max_margin_used_pct': round(float(self.max_margin_used_pct), 2),
