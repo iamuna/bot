@@ -27,8 +27,9 @@ if errorlevel 1 goto :pip_fail
 echo.
 echo Terminal 3 v2.5B warmup stability check
 echo Candidate is FROZEN: 2h+ entries, same fees/slippage/risk/exit logic.
-echo Only methodology change: 60-day warmup -^> 90-day warmup.
-echo The reserved final holdout is NOT touched by this run.
+echo Methodology check: 13 already-seen windows with a 90-day warmup.
+echo The oldest research window is intentionally omitted so this run does not
+echo load any BTC history earlier than the original research run already used.
 echo.
 
 if "%~1"=="" (
@@ -37,7 +38,7 @@ if "%~1"=="" (
   set "DATA=%~1"
 )
 
-"%PY%" -u backtest_v25_research.py "%DATA%" --workers 0 --warmup-days 90 --out backtest_results_v25b_stability_90d
+"%PY%" -u backtest_v25_research.py "%DATA%" --workers 0 --windows 13 --warmup-days 90 --out backtest_results_v25b_stability_90d
 set "RC=%ERRORLEVEL%"
 goto :finish
 
