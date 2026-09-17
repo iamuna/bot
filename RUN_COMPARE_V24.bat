@@ -14,14 +14,18 @@ echo ========================================
 echo.
 
 set "INPUT=%~1"
-if not defined INPUT (
-  echo No data file was passed to the launcher.
-  echo.
-  echo You can paste the full path below, or drag the ZIP into this window.
-  set /p "INPUT=BTC 1-minute CSV/ZIP path: "
-  set "INPUT=%INPUT:"=%"
-)
+if defined INPUT goto :input_ready
 
+echo No data file was passed to the launcher.
+echo.
+echo Paste the full path below, or drag the ZIP into this window, then press Enter.
+set /p "INPUT=BTC 1-minute CSV/ZIP path: "
+
+rem This line is intentionally OUTSIDE a parenthesized block. CMD expands
+rem percent variables before executing a block, which broke the previous prompt.
+set "INPUT=%INPUT:"=%"
+
+:input_ready
 if not defined INPUT (
   echo.
   echo ERROR: No input file selected.
