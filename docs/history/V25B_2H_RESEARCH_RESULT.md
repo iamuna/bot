@@ -2,7 +2,7 @@
 
 Candidate B changed only the minimum entry timeframe from 1h+ to **2h+** while keeping the v2.4.2 cost/risk stack unchanged.
 
-Research corpus: the same 14 already-inspected 180-day BTC windows used for architecture research. This was **not** a blind validation run. The reserved earliest holdout remained untouched.
+Research corpus: the same 14 already-inspected 180-day BTC windows used for architecture research. This was **not** a blind validation run.
 
 Completed result:
 
@@ -46,4 +46,12 @@ Timeframe diagnosis from the realized v2.5B trades:
 
 These per-timeframe numbers are diagnostics only. Selectively deleting losing timeframes after seeing the sample would be curve fitting because portfolio slots, equity, throttling and later entries would all change.
 
-A methodology caveat remains: the research windows used a 60-day no-trade warm-up. That is enough to fully initialize the 2h-6h EMA200 calculations that dominate this candidate, but the TA engine requires 200 bars for EMA200 and 60 days provides only 180 8h bars. The reserved earliest holdout has roughly 97 days of pre-window data available in the current dataset. Before consuming it, candidate B should therefore receive one non-blind warm-up stability rerun on the same 14 research windows using a 90-day warm-up. No strategy parameter changes are permitted during that check.
+## Warm-up / holdout correction
+
+The original plan described the 180 days immediately before the oldest research evaluation window as an untouched future holdout. That description was too strong. The oldest research window used a 60-day no-trade warm-up, so the final 60 days of that earlier 180-day interval were already loaded into the indicator state. They were not traded or scored for PnL, but they still influenced research-window indicators and therefore cannot be called completely blind data anymore.
+
+The original 14-window/60-day research run first loaded early BTC history at approximately **2018-03-22 11:02 UTC**. Data earlier than that boundary remains the cleanest untouched segment in the current CSV.
+
+The TA engine requires 200 bars before EMA200 is included. Sixty days fully initializes the 2h-6h entry horizons that dominate this candidate, but supplies only 180 8h bars. A 90-day warm-up would improve initialization, but applying it to all 14 windows would read new early data and shrink the untouched segment.
+
+Therefore the next methodology check uses **13 already-seen windows with a 90-day warm-up** and intentionally omits the oldest research window. This keeps the stability check inside history that was already consumed by research. No strategy parameter changes are permitted during that check. The fully untouched final validation segment will be defined only after warm-up methodology is frozen.
