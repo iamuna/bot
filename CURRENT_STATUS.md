@@ -75,6 +75,14 @@ Full record:
 
 ### Continuous chronological replay over the full available BTC history
 
+Implementation is ready:
+
+`RUN_V25_CHRONOLOGICAL.bat`
+
+Input: the same BTC 1-minute CSV.
+
+The runner hard-locks the frozen v2.5B research settings, uses one 90-day no-trade warm-up, then replays the rest of the dataset continuously with **zero periodic state resets**. It shows live progress/ETA and writes full aggregate results plus a calendar-year realized-trade breakdown to `backtest_results_v25b_chronological/`.
+
 Purpose: audit whether the candidate's behavior is materially affected by the reset/warm-up structure used by the independent research windows and verify performance through changing market regimes in one uninterrupted stateful replay.
 
 Requirements:
@@ -84,7 +92,7 @@ Requirements:
 3. After warm-up, replay the remaining dataset continuously with no periodic state resets.
 4. Preserve all normal fees, slippage, risk controls, exits, leverage and portfolio caps.
 5. Report full-history aggregate performance plus chronological period breakdowns so regime concentration is visible.
-6. Add visible replay progress and ETA; progress instrumentation must not alter trading calculations.
+6. Show visible replay progress and ETA; progress instrumentation must not alter trading calculations.
 7. Treat this as a historical audit, **not** a new blind validation test, because the dataset has already been inspected.
 
 Do not use the chronological replay to silently optimize the current frozen candidate. Any future strategy revision must become a new named candidate and require genuinely fresh independent data for its next out-of-sample test.
@@ -121,6 +129,7 @@ Use these to reconstruct project state in a future chat/session:
 - `docs/history/V25B_2H_RESEARCH_RESULT.md` — original candidate B result
 - `docs/history/V25B_90D_STABILITY_RESULT.md` — warm-up stability result
 - `docs/history/V25B_FINAL_UNTOUCHED_VALIDATION_RESULT.md` — consumed independent validation result
+- `backtest_v25_chronological.py` — current full-history audit runner
 - `README.md` — repository overview and branch status
 - Git commit history — chronological implementation record
 
