@@ -32,13 +32,23 @@ def main() -> int:
     stability_floor = min(int(s['warmup_start_ms']) for s in stability)
     assert stability_floor >= research_floor
 
+    # A final untouched validation interval can be created strictly before the
+    # original research floor. Given a synthetic dataset beginning sufficiently
+    # earlier, a 90d warmup is followed by an evaluation that ends one minute
+    # before research_floor, so evaluation and research history cannot overlap.
+    synthetic_first = research_floor - 220 * DAY_MS
+    final_eval_start = synthetic_first + 90 * DAY_MS
+    final_eval_end = research_floor - MINUTE_MS
+    assert synthetic_first < final_eval_start < final_eval_end < research_floor
+    assert final_eval_start - synthetic_first == 90 * DAY_MS
+
     # The 180d interval immediately before the oldest research evaluation is
     # not fully blind: the original 60d warmup lies inside that interval.
     prior_end = int(research[-1]['eval_start_ms']) - MINUTE_MS
     prior_start = prior_end - 180 * DAY_MS + MINUTE_MS
     assert prior_start < research_floor <= prior_end
 
-    print('V2.5 SELF TEST OK: 2h entry floor + safe 13-window/90d stability boundary')
+    print('V2.5 SELF TEST OK: 2h floor + safe stability + untouched final-validation boundary')
     return 0
 
 
