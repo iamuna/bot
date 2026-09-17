@@ -36,8 +36,8 @@ def positive_integer(raw: str, name: str) -> str:
 
 
 def default_workers() -> int:
-    # Full-CPU mode: use every logical processor the OS exposes. On the user's
-    # 8-core / 16-thread desktop this resolves to 16 worker processes.
+    # Maximum-use mode: use every logical processor the OS exposes. On the
+    # user's 8-core / 16-thread desktop this resolves to 16 worker processes.
     return max(1, int(os.cpu_count() or 1))
 
 
@@ -60,7 +60,7 @@ def self_test() -> int:
         pass
     else:
         raise AssertionError('zero must be rejected')
-    print('V2.4 LAUNCHER SELF TEST OK: quoted paths, numeric arguments, and full-CPU worker selection')
+    print('V2.4 LAUNCHER SELF TEST OK: quoted paths, numeric arguments, and maximum-use CPU selection')
     return 0
 
 
@@ -101,26 +101,27 @@ def main(argv: list[str] | None = None) -> int:
         append_log(log_path, f'Input: {input_path}')
         append_log(log_path, f'Days: {days}')
         append_log(log_path, f'Leverage: {leverage}x')
-        append_log(log_path, f'Full CPU workers: {workers}')
+        append_log(log_path, f'Maximum-use workers: {workers}')
 
         print('\n========================================')
         print('Terminal 3.0 v2.4 Backtest Comparison')
-        print('Base vs Guarded - FULL CPU + Live ETA')
+        print('Base vs Guarded - MAXIMUM USE MODE')
         print('========================================')
         print(f'Data file: {input_path}')
         print(f'Research window: most recent {days} days')
         print(f'Leverage setting: {leverage}x')
-        print(f'Full CPU workers: {workers}')
+        print(f'CPU workers available to parallel stages: {workers}')
+        print('Concurrent final replay: BASE + GUARDED run at the same time')
         print('Gross exposure cap: 3.15x account equity')
         print('Portfolio margin budget: 45% of account equity')
         print('Fee assumption: 6 bps per side')
         print('Slippage assumption: 1 bp per side')
         print('NOTE: liquidation mechanics are not modeled in this research pass.')
         if input_path.suffix.lower() == '.csv':
-            print('CSV mode: range detection is instant-ish; loading, resampling and TA may use all logical CPUs.')
+            print('CSV mode: range detection is direct; loading, resampling and TA can use all logical CPUs.')
         else:
-            print('ZIP mode: compressed range scan/load can remain sequential; later stages use full CPU.')
-        print('\nStarting comparison in full-CPU mode.\n', flush=True)
+            print('ZIP mode: decompression itself can remain serial; later stages use all logical CPUs.')
+        print('\nStarting comparison. The runner will use as much useful compute as each stage can safely consume.\n', flush=True)
 
         cmd = [
             sys.executable,
