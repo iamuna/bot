@@ -18,10 +18,35 @@ See `history/V25A_1H_RESEARCH_RESULT.md` for the full result.
 
 Candidate B makes exactly one additional structural change: raise the minimum entry timeframe from 1h to **2h**. Lower timeframes remain available to TA/context. All other cost, risk, exit, leverage and portfolio-cap logic remains unchanged.
 
-Research sequence:
+The first 14-window candidate-B run was materially stronger than candidate A:
 
-1. Re-run the same 14 inspected 180-day windows with the 2h+ candidate.
-2. Require a materially better margin than breakeven before touching the reserved holdout. PF should be comfortably above 1 after modeled costs, drawdowns should remain controlled, and the result should not depend on one window.
-3. If candidate B remains weak, reject it and continue architecture research only on the inspected research corpus.
-4. If candidate B is strong enough, freeze it before consuming the reserved earliest 180-day holdout exactly once.
-5. Only after successful independent validation move to perpetual-specific funding, maintenance margin/liquidation, execution realism, gap handling, and demo/PAPER validation.
+- 11 / 14 positive windows
+- +$155.42 sum of independent net PnL
+- pooled PF 1.0660
+- 2,696 trades
+- $194.22 modeled fees
+- mean 180-day return +1.110%
+- median 180-day return +1.235%
+- best window +9.61%
+- worst window -9.19%
+- worst window max drawdown 10.50%
+
+Removing the single best window still leaves about +$59.33 and pooled PF about 1.028, so the result is not entirely dependent on one lucky period. It is nevertheless still a modest edge, not a wide safety margin. See `history/V25B_2H_RESEARCH_RESULT.md`.
+
+## Warm-up stability gate
+
+The 14-window research harness historically used a 60-day no-trade warm-up. The TA engine requires 200 bars before EMA200 is included. Sixty days fully initializes the dominant 2h-6h entry horizons, but supplies only 180 bars on 8h and less on longer horizons that still participate in cross-timeframe context.
+
+The earliest reserved holdout has roughly 97 days of pre-window data available in the current CSV. Before consuming that holdout, candidate B is frozen and rerun on the same 14 inspected research windows with a **90-day warm-up**. No strategy parameters may change during this check.
+
+Run `RUN_V25_STABILITY_90D.bat`.
+
+Decision sequence:
+
+1. Candidate B strategy settings stay frozen at the completed 2h configuration.
+2. Re-run the same 14 inspected windows with a 90-day warm-up only.
+3. If the result changes materially or collapses toward breakeven, do not consume the reserved holdout; audit initialization/context methodology first.
+4. If candidate B remains materially positive with controlled drawdown, freeze both strategy and 90-day warm-up methodology.
+5. Run the reserved earliest 180-day holdout exactly once.
+6. After that, no remaining historical BTC period in this CSV should be described as blind validation data for this candidate.
+7. Only after successful independent validation move to perpetual-specific funding, maintenance margin/liquidation, execution realism, gap handling, and demo/PAPER validation.
