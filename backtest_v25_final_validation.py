@@ -15,6 +15,16 @@ from backtest_oos_v242 import DAY_MS, MINUTE_MS, iso_ms, plan_windows
 from backtest_v25 import V25Backtester, V25_CONFIG
 
 
+FROZEN_WARMUP_DAYS = 90
+FROZEN_EQUITY = 1000.0
+FROZEN_FEE_BPS = 6.0
+FROZEN_SLIPPAGE_BPS = 1.0
+FROZEN_LEVERAGE = 30.0
+FROZEN_GROSS_CAP_X = 3.15
+FROZEN_PORTFOLIO_MARGIN_PCT = 45.0
+REPRODUCTION_STATUS = 'HISTORICAL REPRODUCTION OF CONSUMED V2.5B EARLY HOLDOUT'
+
+
 class ReplayProgressRows:
     """Read-only sequence wrapper that reports replay progress without changing bars."""
 
@@ -65,7 +75,7 @@ class ReplayProgressRows:
 
 
 class FinalValidationBacktester(V25Backtester):
-    """Frozen v2.5B with a no-trade warm-up before the validation interval."""
+    """Frozen v2.5B reproduction with a no-trade warm-up before the consumed holdout."""
 
     def __init__(self, base, evaluation_start_ms: int, *args, **kwargs):
         self.evaluation_start_ms = int(evaluation_start_ms)
@@ -81,8 +91,10 @@ class FinalValidationBacktester(V25Backtester):
     def report(self):
         r = super().report()
         r.update({
-            'validation_status': 'FINAL UNTOUCHED EARLY VALIDATION - NOT RESEARCH',
+            'validation_status': REPRODUCTION_STATUS,
+            'original_validation_status': 'FINAL UNTOUCHED EARLY VALIDATION - NOT RESEARCH',
             'candidate_frozen': True,
+            'holdout_consumed': True,
             'evaluation_start_ms': self.evaluation_start_ms,
             'evaluation_start': iso_ms(self.evaluation_start_ms),
             'warmup_entry_blocks': self.warmup_entry_blocks,
@@ -90,28 +102,41 @@ class FinalValidationBacktester(V25Backtester):
         return r
 
 
+def _locked(ap, name: str, value: float, expected: float) -> None:
+    if abs(float(value) - float(expected)) > 1e-12:
+        ap.error(f'{name} is locked to the frozen value {expected}')
+
+
 def main() -> int:
     overall_started = time.perf_counter()
-    ap = argparse.ArgumentParser(description='Terminal 3 v2.5B final untouched early validation')
+    ap = argparse.ArgumentParser(
+        description='Terminal 3 v2.5B historical reproduction of consumed early holdout'
+    )
     ap.add_argument('csv')
-    ap.add_argument('--warmup-days', type=int, default=90)
-    ap.add_argument('--equity', type=float, default=1000.0)
-    ap.add_argument('--fee-bps', type=float, default=6.0)
-    ap.add_argument('--slippage-bps', type=float, default=1.0)
-    ap.add_argument('--leverage', type=float, default=30.0)
-    ap.add_argument('--gross-cap-x', type=float, default=3.15)
-    ap.add_argument('--portfolio-margin-pct', type=float, default=45.0)
+    ap.add_argument('--warmup-days', type=int, default=FROZEN_WARMUP_DAYS)
+    ap.add_argument('--equity', type=float, default=FROZEN_EQUITY)
+    ap.add_argument('--fee-bps', type=float, default=FROZEN_FEE_BPS)
+    ap.add_argument('--slippage-bps', type=float, default=FROZEN_SLIPPAGE_BPS)
+    ap.add_argument('--leverage', type=float, default=FROZEN_LEVERAGE)
+    ap.add_argument('--gross-cap-x', type=float, default=FROZEN_GROSS_CAP_X)
+    ap.add_argument('--portfolio-margin-pct', type=float, default=FROZEN_PORTFOLIO_MARGIN_PCT)
     ap.add_argument('--workers', type=int, default=0)
     ap.add_argument('--out', default='backtest_results_v25b_final_validation')
     a = ap.parse_args()
 
-    # This protocol is intentionally locked. Changing warm-up length after
-    # seeing the stability result would turn methodology into another tuning
-    # parameter and invalidate the final validation boundary.
-    if a.warmup_days != 90:
-        ap.error('final validation is locked to the frozen 90-day warm-up')
-    if not (1 <= a.leverage <= 30):
-        ap.error('--leverage must be between 1x and 30x')
+    # The official untouched run has already been completed and recorded.
+    # This launcher is retained only for exact historical reproduction, so all
+    # result-affecting assumptions are equality-locked to the frozen protocol.
+    if a.warmup_days != FROZEN_WARMUP_DAYS:
+        ap.error(f'--warmup-days is locked to {FROZEN_WARMUP_DAYS}')
+    _locked(ap, '--equity', a.equity, FROZEN_EQUITY)
+    _locked(ap, '--fee-bps', a.fee_bps, FROZEN_FEE_BPS)
+    _locked(ap, '--slippage-bps', a.slippage_bps, FROZEN_SLIPPAGE_BPS)
+    _locked(ap, '--leverage', a.leverage, FROZEN_LEVERAGE)
+    _locked(ap, '--gross-cap-x', a.gross_cap_x, FROZEN_GROSS_CAP_X)
+    _locked(ap, '--portfolio-margin-pct', a.portfolio_margin_pct, FROZEN_PORTFOLIO_MARGIN_PCT)
+    if a.workers < 0:
+        ap.error('--workers must be 0 (auto) or a positive integer')
 
     path = Path(a.csv)
     _, last_open_ms, layout = resolve_time_range_fast(path, None, None, None)
@@ -126,10 +151,6 @@ def main() -> int:
     if first_open_ms is None or last_open_ms is None:
         raise RuntimeError('Could not determine dataset boundaries')
 
-    # Reconstruct the first timestamp ever consumed by the original v2.5B
-    # 14-window/60-day research protocol. The final validation evaluation must
-    # end strictly before this timestamp so none of its evaluation candles have
-    # ever appeared in research, even as warm-up/context.
     research_specs = plan_windows(
         int(last_open_ms), windows=14, window_days=180,
         skip_recent_days=180, warmup_days=60,
@@ -142,18 +163,17 @@ def main() -> int:
 
     if eval_start_ms >= eval_end_ms:
         raise RuntimeError(
-            'Dataset does not contain enough untouched early history for the '
-            'locked 90-day warm-up plus a validation interval.'
+            'Dataset does not contain enough early history for the locked '
+            '90-day warm-up plus the historical holdout interval.'
         )
 
     workers = all_cpu_workers(a.workers)
     print('=' * 76)
-    print('Terminal 3 v2.5B FINAL UNTOUCHED EARLY VALIDATION')
+    print('Terminal 3 v2.5B HISTORICAL HOLDOUT REPRODUCTION')
     print('=' * 76)
-    print('Strategy is frozen: 2h+ entries, unchanged costs/risk/exits/caps.')
-    print('Warm-up methodology is frozen at 90 days.')
-    print('No candle at or after the original v2.5 research-history boundary')
-    print('is loaded by this validation run.')
+    print('The original untouched validation was already completed and recorded.')
+    print('This rerun is for reproducibility only; it is NOT new blind validation.')
+    print('All result-affecting assumptions are hard-locked to the frozen protocol.')
     print(f'Dataset first candle:   {iso_ms(first_open_ms)}')
     print(f'Warm-up start:          {iso_ms(warmup_start_ms)}')
     print(f'Evaluation start:       {iso_ms(eval_start_ms)}')
@@ -169,11 +189,11 @@ def main() -> int:
     )
     load_seconds = time.perf_counter() - load_started
     if len(rows) < 100:
-        raise RuntimeError('Validation slice has insufficient data')
+        raise RuntimeError('Reproduction slice has insufficient data')
     if int(rows[0]['t']) < warmup_start_ms or int(rows[-1]['t']) > eval_end_ms:
-        raise RuntimeError('Loaded rows escaped the locked validation boundary')
+        raise RuntimeError('Loaded rows escaped the locked reproduction boundary')
     if int(rows[-1]['t']) >= research_floor_ms:
-        raise RuntimeError('Validation attempted to read research-era history')
+        raise RuntimeError('Reproduction attempted to read research-era history')
 
     core.LEVERAGE = float(a.leverage)
     portfolio_cap.PORTFOLIO_GROSS_NOTIONAL_X = float(a.gross_cap_x)
@@ -188,16 +208,16 @@ def main() -> int:
         fee_bps=a.fee_bps,
         slippage_bps=a.slippage_bps,
     )
-    # Wrap only after initialization so TA/resampling setup remains untouched.
-    # The wrapper changes console output only; bar order/content and strategy logic are identical.
-    bt.base = ReplayProgressRows(bt.base)
+    bt.base = ReplayProgressRows(bt.base, label='HOLDOUT REPRODUCTION')
     report = bt.run()
     replay_seconds = time.perf_counter() - replay_started
 
     report.update({
-        'validation_status': 'FINAL UNTOUCHED EARLY VALIDATION - NOT RESEARCH',
+        'validation_status': REPRODUCTION_STATUS,
+        'original_validation_status': 'FINAL UNTOUCHED EARLY VALIDATION - NOT RESEARCH',
         'candidate': 'Terminal 3 v2.5B 2h-entry candidate',
         'candidate_frozen': True,
+        'holdout_consumed': True,
         'warmup_days': a.warmup_days,
         'warmup_start_ms': warmup_start_ms,
         'warmup_start': iso_ms(warmup_start_ms),
@@ -225,7 +245,9 @@ def main() -> int:
     summary = {
         'candidate': report['candidate'],
         'validation_status': report['validation_status'],
+        'original_validation_status': report['original_validation_status'],
         'candidate_frozen': True,
+        'holdout_consumed': True,
         'warmup_days': a.warmup_days,
         'warmup_start': report['warmup_start'],
         'evaluation_start': report['evaluation_start'],
@@ -250,12 +272,12 @@ def main() -> int:
         'replay_elapsed_seconds': report['replay_elapsed_seconds'],
         'elapsed_seconds': report['elapsed_seconds'],
     }
-    (out / f'v25b_final_validation_summary_{stamp}.json').write_text(
+    (out / f'v25b_final_validation_reproduction_summary_{stamp}.json').write_text(
         json.dumps(summary, indent=2), encoding='utf-8'
     )
 
     print('\n' + '=' * 76)
-    print('V2.5B FINAL VALIDATION COMPLETE')
+    print('V2.5B HISTORICAL HOLDOUT REPRODUCTION COMPLETE')
     print('=' * 76)
     print(json.dumps(summary, indent=2))
     print(f'\nResults folder: {out}')
