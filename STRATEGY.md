@@ -4,13 +4,13 @@
 
 The runtime bot on this branch is still the v2.3 30-timeframe Terminal 3.0 system. `VERSION` therefore remains `2.3`. Research changes are isolated in the historical backtest classes and are not silently wired into LIVE trading.
 
-## Current research candidate: v2.5
+## Current research candidate: v2.5B
 
-v2.5 inherits the full v2.4.2 Efficient stack and changes one structural rule:
+v2.5B inherits the full v2.4.2 Efficient stack and changes one structural rule from candidate A:
 
-**Only signals from 1h and higher may open positions.**
+**Only signals from 2h and higher may open positions.**
 
-The 1m/3m/5m/15m/30m data still participate in technical analysis and cross-timeframe context; they simply cannot create new v2.5 entries.
+Lower timeframes still participate in technical analysis and cross-timeframe context; they simply cannot create new v2.5B entries.
 
 Inherited controls include:
 
@@ -25,12 +25,16 @@ Inherited controls include:
 
 The current research runner uses 6 bps fee + 1 bp slippage per side, a 30x leverage setting, 3.15x aggregate gross exposure cap and 45% margin budget. Under that gross cap, 30x changes margin efficiency rather than allowing 30x account notional.
 
+## Candidate A result
+
+The 1h+ candidate reduced trading activity and fees substantially but still finished essentially breakeven on the 14 inspected research windows: pooled PF 1.0023, +$8.63 independent net PnL, 8,273 trades, $388.69 modeled fees, and 11/14 positive windows.
+
+Its realized 1h entries dominated activity and lost $226.43 net across 5,608 trades. That observation is only a diagnostic, not a valid filtered backtest. Candidate B therefore reruns the full simulator with the entry floor raised to 2h rather than deleting 1h trades after the fact.
+
 ## Validation status
 
-v2.4.2 did not clear its final robustness gate. Across the inspected independent windows it was approximately breakeven after costs, which is too execution-sensitive to treat as a reliable edge.
-
-Those inspected windows are now research data for v2.5. The v2.5 candidate must be frozen before the final reserved historical holdout is touched.
+The inspected historical windows are research data. The earliest reserved 180-day holdout remains untouched and must stay untouched until a candidate is frozen with a materially stronger after-cost margin than breakeven.
 
 Even a successful historical holdout will not make the system live-ready. Remaining validation work includes perpetual-specific funding, maintenance margin/liquidation, execution realism, gap handling, and demo/PAPER behavior.
 
-See `docs/V25_RESEARCH_PLAN.md` and `docs/history/VALIDATION_V242_FINAL_HOLDOUT.md` for the current research gate and prior result.
+See `docs/V25_RESEARCH_PLAN.md`, `docs/history/V25A_1H_RESEARCH_RESULT.md`, and `docs/history/VALIDATION_V242_FINAL_HOLDOUT.md`.
