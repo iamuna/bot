@@ -27,43 +27,60 @@ def synthetic(n=180):
 
 def main():
     portfolio_cap.install()
-    bt = core.Backtester(synthetic(), equity=1000.0, fee_bps=6.0, slippage_bps=1.0)
-    bar = bt.base[-1]
-    entry_ref = float(bar['o'])
-    c = core.Candidate(
-        tf='1m', side='BUY', signal_t=int(bar['ct']), quality=100.0,
-        confluence=100.0, priority=100.0, entry_ref=entry_ref,
-        stop_ref=entry_ref - 0.01, target_ref=entry_ref + 0.02,
-        regime='BREAKOUT UP', atr=1.0,
-    )
-
-    # Tight stop would request enormous quantity, so portfolio exposure must be
-    # the binding constraint rather than per-trade risk sizing.
-    bt._open_candidate(c, bar)
-    assert len(bt.positions) == 1
-    exp = portfolio_cap.current_exposure(bt, float(bar['o']))
-    assert exp['gross_notional_x_equity'] <= portfolio_cap.effective_gross_cap_x() + 1e-9
-    assert exp['margin_used_pct'] <= portfolio_cap.PORTFOLIO_MARGIN_USE_PCT + 1e-9
-
-    # A second tight-stop position must not stack another full 45% margin block.
-    bt._open_candidate(c, bar)
-    assert len(bt.positions) == 1
-    assert bt.portfolio_cap_rejections >= 1
-
-    # Raising leverage must NOT automatically raise the explicit gross exposure
-    # ceiling.  At 30x the cap remains 3.15x equity; leverage only frees margin.
     old_lev = core.LEVERAGE
+    old_gross = portfolio_cap.PORTFOLIO_GROSS_NOTIONAL_X
+    old_margin = portfolio_cap.PORTFOLIO_MARGIN_USE_PCT
     try:
         core.LEVERAGE = 30.0
+        portfolio_cap.PORTFOLIO_GROSS_NOTIONAL_X = 3.15
+        portfolio_cap.PORTFOLIO_MARGIN_USE_PCT = 45.0
+
+        bt = core.Backtester(synthetic(), equity=1000.0, fee_bps=6.0, slippage_bps=1.0)
+        bar = bt.base[-1]
+        entry_ref = float(bar['o'])
+        c = core.Candidate(
+            tf='1m', side='BUY', signal_t=int(bar['ct']), quality=100.0,
+            confluence=100.0, priority=100.0, entry_ref=entry_ref,
+            stop_ref=entry_ref - 0.01, target_ref=entry_ref + 0.02,
+            regime='BREAKOUT UP', atr=1.0,
+        )
+
+        # Tight stop requests enormous quantity. At 30x leverage the explicit
+        # account-wide 3.15x gross cap, not the old per-position 45% block,
+        # must be the binding exposure constraint.
+        bt._open_candidate(c, bar)
+        assert len(bt.positions) == 1
+        exp = portfolio_cap.current_exposure(bt, float(bar['o']))
+        assert exp['gross_notional_x_equity'] <= 3.15 + 1e-9
+        assert exp['margin_used_pct'] <= 45.0 + 1e-9
+        assert exp['margin_used_pct'] <= 10.6  # 3.15x / 30x ~= 10.5%
+        assert bt.portfolio_cap_scaled_entries >= 1
+
+        # A second tight-stop position must not stack another full exposure
+        # block merely because 30x leverage leaves unused initial margin.
+        bt._open_candidate(c, bar)
+        assert len(bt.positions) == 1
+        assert bt.portfolio_cap_rejections >= 1
+
+        # Lower leverage can reduce the effective gross cap because the shared
+        # margin budget becomes binding; higher leverage cannot raise it above
+        # the explicit gross cap.
+        core.LEVERAGE = 5.0
+        assert abs(portfolio_cap.effective_gross_cap_x() - 2.25) < 1e-12
+        core.LEVERAGE = 30.0
         assert abs(portfolio_cap.effective_gross_cap_x() - 3.15) < 1e-12
+
+        r = bt.report()
+        assert r['portfolio_margin_cap_pct'] == 45.0
+        assert r['portfolio_gross_notional_cap_x'] == 3.15
+        assert r['leverage'] == 30.0
+        assert r['liquidation_modeled'] is False
+        assert r['max_gross_notional_x_equity'] <= 3.15 + 1e-9
+        print('PORTFOLIO CAP SELF TEST OK: 30x leverage decoupled from 3.15x gross exposure, shared margin budget enforced')
     finally:
         core.LEVERAGE = old_lev
-
-    r = bt.report()
-    assert r['portfolio_margin_cap_pct'] == 45.0
-    assert r['portfolio_gross_notional_cap_x'] == 3.15
-    assert r['max_gross_notional_x_equity'] <= 3.15 + 1e-9
-    print('PORTFOLIO CAP SELF TEST OK: shared 45% margin budget, 3.15x gross cap, leverage decoupled from exposure')
+        portfolio_cap.PORTFOLIO_GROSS_NOTIONAL_X = old_gross
+        portfolio_cap.PORTFOLIO_MARGIN_USE_PCT = old_margin
 
 
 if __name__ == '__main__':
