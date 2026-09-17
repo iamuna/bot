@@ -36,8 +36,9 @@ def positive_integer(raw: str, name: str) -> str:
 
 
 def default_workers() -> int:
-    logical = max(1, int(os.cpu_count() or 1))
-    return max(1, min(8, logical // 2 if logical >= 4 else logical))
+    # Full-CPU mode: use every logical processor the OS exposes. On the user's
+    # 8-core / 16-thread desktop this resolves to 16 worker processes.
+    return max(1, int(os.cpu_count() or 1))
 
 
 def append_log(log_path: Path, text: str) -> None:
@@ -51,15 +52,15 @@ def self_test() -> int:
     assert positive_number('180', 'days') == '180'
     assert positive_number('30', 'leverage') == '30'
     assert positive_number('7.5', 'leverage') == '7.5'
-    assert positive_integer('8', 'workers') == '8'
-    assert default_workers() >= 1
+    assert positive_integer('16', 'workers') == '16'
+    assert default_workers() == max(1, int(os.cpu_count() or 1))
     try:
         positive_number('0', 'days')
     except ValueError:
         pass
     else:
         raise AssertionError('zero must be rejected')
-    print('V2.4 LAUNCHER SELF TEST OK: quoted paths, numeric arguments, and CPU worker selection')
+    print('V2.4 LAUNCHER SELF TEST OK: quoted paths, numeric arguments, and full-CPU worker selection')
     return 0
 
 
@@ -80,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
             raw_path = argv[0]
         else:
             print('No data file was passed to the launcher.')
-            print('Paste the full path below, or drag the ZIP into this window.')
+            print('Paste the full path below, or drag the CSV/ZIP into this window.')
             raw_path = input('BTC 1-minute CSV/ZIP path: ')
 
         input_text = clean_path(raw_path)
@@ -100,27 +101,31 @@ def main(argv: list[str] | None = None) -> int:
         append_log(log_path, f'Input: {input_path}')
         append_log(log_path, f'Days: {days}')
         append_log(log_path, f'Leverage: {leverage}x')
-        append_log(log_path, f'TA workers: {workers}')
+        append_log(log_path, f'Full CPU workers: {workers}')
 
         print('\n========================================')
         print('Terminal 3.0 v2.4 Backtest Comparison')
-        print('Base vs Guarded - Multi-Core + Live ETA')
+        print('Base vs Guarded - FULL CPU + Live ETA')
         print('========================================')
         print(f'Data file: {input_path}')
         print(f'Research window: most recent {days} days')
         print(f'Leverage setting: {leverage}x')
-        print(f'TA CPU workers: {workers}')
+        print(f'Full CPU workers: {workers}')
         print('Gross exposure cap: 3.15x account equity')
         print('Portfolio margin budget: 45% of account equity')
         print('Fee assumption: 6 bps per side')
         print('Slippage assumption: 1 bp per side')
         print('NOTE: liquidation mechanics are not modeled in this research pass.')
-        print('\nStarting comparison. The TA precompute stage should use multiple CPU cores.\n', flush=True)
+        if input_path.suffix.lower() == '.csv':
+            print('CSV mode: range detection is instant-ish; loading, resampling and TA may use all logical CPUs.')
+        else:
+            print('ZIP mode: compressed range scan/load can remain sequential; later stages use full CPU.')
+        print('\nStarting comparison in full-CPU mode.\n', flush=True)
 
         cmd = [
             sys.executable,
             '-u',
-            str(root / 'backtest_progress_runner.py'),
+            str(root / 'backtest_full_cpu_runner.py'),
             str(input_path),
             '--last-days', days,
             '--fee-bps', '6',
