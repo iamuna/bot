@@ -34,3 +34,5 @@ jobs:
         run: python backtest_progress_self_test.py
       - name: Run v2.4 portfolio cap self-test
         run: python portfolio_cap_self_test.py
+      - name: Run v2.4 launcher self-test
+        run: python launcher_v24.py --self-test
