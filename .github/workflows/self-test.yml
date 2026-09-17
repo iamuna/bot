@@ -46,3 +46,5 @@ jobs:
         run: python launcher_v24.py --self-test
       - name: Run v2.4 OOS launcher self-test
         run: python launcher_oos_v242.py --self-test
+      - name: Run v2.4 final holdout launcher self-test
+        run: python launcher_final_holdout_v242.py --self-test
