@@ -31,30 +31,58 @@ The first 14-window candidate-B run was materially stronger than candidate A:
 - worst window -9.19%
 - worst window max drawdown 10.50%
 
-Removing the single best window still leaves about +$59.33 and pooled PF about 1.028, so the result is not entirely dependent on one lucky period. It is nevertheless still a modest edge, not a wide safety margin. See `history/V25B_2H_RESEARCH_RESULT.md`.
+See `history/V25B_2H_RESEARCH_RESULT.md`.
 
 ## Holdout-boundary correction
 
 The original v2.5 plan described the 180 days immediately before the oldest research evaluation window as a future blind holdout. That was too strong: the oldest research window used a 60-day no-trade warm-up, so the final 60 days of that earlier interval were already loaded into indicator state. They were not traded, but their prices influenced research-window indicators.
 
-The original 14-window/60-day research run first loaded early BTC history at approximately **2018-03-22 11:02 UTC**. Data earlier than that boundary is the cleanest untouched segment remaining in this CSV. The final validation interval will therefore be defined inside that earlier segment after warm-up methodology is frozen; it will be shorter than the previously planned 180 days.
+The original 14-window/60-day research run first loaded early BTC history at approximately **2018-03-22 11:02 UTC**. Data earlier than that timestamp is the clean untouched segment remaining in this CSV.
 
-## Warm-up stability gate
+## Warm-up stability gate — PASSED
 
-The TA engine requires 200 bars before EMA200 is included. Sixty days fully initializes the dominant 2h-6h entry horizons, but supplies only 180 bars on 8h and fewer bars on longer horizons that still participate in cross-timeframe context.
+The safe stability test reran only the 13 already-seen newest research windows with a **90-day warm-up**, leaving the untouched early segment unconsumed.
 
-A 90-day stability check is useful, but running 90-day warm-up on all 14 windows would load new early BTC history and contaminate the remaining untouched segment. The safe check therefore uses **13 already-seen research windows with a 90-day warm-up** and deliberately omits the oldest research window.
+Result:
 
-Run `RUN_V25_STABILITY_90D.bat`.
+- 10 / 13 positive windows
+- +$224.93 sum of independent net PnL
+- pooled PF 1.1054
+- 2,502 trades
+- $174.00 modeled fees
+- mean 180-day return +1.730%
+- median 180-day return +1.330%
+- best window +7.80%
+- worst window -7.10%
+- worst window max drawdown 9.80%
 
-The runner itself enforces two allowed modes only: the original 14-window/60-day research run, or the safe 13-window/90-day stability check. It refuses requests that would load history earlier than the original research boundary.
+For the same 13 windows, the original 60-day warm-up produced about +$133.36 and PF 1.0590. All 13 windows preserved their positive/negative sign when warm-up changed, with return correlation about 0.859. Magnitudes moved materially, so initialization still matters, but the candidate did not collapse or reverse. See `history/V25B_90D_STABILITY_RESULT.md`.
+
+Candidate B strategy parameters and the 90-day warm-up methodology are now frozen. No more timeframe, threshold, risk, exit, fee, slippage, leverage or warm-up tuning is permitted before final validation.
+
+## Final untouched early-data validation
+
+Run:
+
+`RUN_V25_FINAL_VALIDATION.bat`
+
+The final runner derives its boundary from the original research protocol rather than from a hard-coded date:
+
+1. Reconstruct the earliest timestamp ever loaded by the original 14-window/60-day v2.5 research run.
+2. End evaluation exactly one minute before that research-history boundary.
+3. Use the earliest available BTC candles as a 90-day no-trade warm-up.
+4. Begin evaluation immediately after that 90-day warm-up.
+5. Refuse any run that overlaps the original research-history boundary.
+
+With the current Binance CSV, this produces a shorter-than-180-day early validation interval because the dataset itself starts in August 2017. That is intentional; preserving untouched data is more important than forcing an arbitrary 180-day length.
 
 Decision sequence:
 
-1. Candidate B strategy settings stay frozen at the completed 2h configuration.
-2. Re-run 13 already-seen windows with a 90-day warm-up only.
-3. If the result changes materially or collapses toward breakeven, do not consume any untouched early history; audit initialization/context methodology first.
-4. If candidate B remains materially positive with controlled drawdown, freeze both strategy and warm-up methodology.
-5. Define the final validation interval strictly before the original research-history boundary and run it exactly once.
-6. After that, no remaining historical BTC period in this CSV should be described as blind validation data for this candidate.
-7. Only after successful independent validation move to perpetual-specific funding, maintenance margin/liquidation, execution realism, gap handling, and demo/PAPER validation.
+1. Run the frozen final early-data validation exactly once.
+2. Record the result regardless of whether it is favorable.
+3. Do not retune against that interval afterward and relabel it as validation.
+4. After this run, no historical period in the current CSV remains untouched for v2.5B.
+5. Next, run a continuous chronological replay over the full available history to audit reset/warm-up artifacts.
+6. Then add perpetual-specific funding, maintenance margin/liquidation, execution realism and gap handling.
+7. Obtain genuinely fresh data (newer BTC history or exchange-specific perpetual history) for the next independent out-of-sample check.
+8. Only after those stages move to demo/PAPER validation. Real money remains out of scope until all validation layers are complete.
