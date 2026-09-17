@@ -82,7 +82,7 @@ def _window_job(spec, base_slice, equity, fee_bps, slippage_bps,
 
 def main() -> int:
     overall_started = time.perf_counter()
-    ap = argparse.ArgumentParser(description='Terminal 3 v2.5B 14-window research battery')
+    ap = argparse.ArgumentParser(description='Terminal 3 v2.5B research/stability battery')
     ap.add_argument('csv')
     ap.add_argument('--windows', type=int, default=14)
     ap.add_argument('--window-days', type=int, default=180)
@@ -98,8 +98,16 @@ def main() -> int:
     ap.add_argument('--out', default='backtest_results_v25_research_2h')
     a = ap.parse_args()
 
-    if a.windows != 14:
-        ap.error('v2.5 research battery is locked to exactly 14 inspected windows')
+    # Only two locked modes are permitted. The 13-window/90-day mode omits the
+    # oldest research window so extending warm-up cannot read any earlier BTC
+    # candles than the original 14-window/60-day research run already loaded.
+    mode = (a.windows, a.warmup_days)
+    if mode not in {(14, 60), (13, 90)}:
+        ap.error(
+            'allowed modes are exactly: 14 windows + 60-day warmup (original research), '
+            'or 13 windows + 90-day warmup (safe stability check)'
+        )
+    stability_mode = mode == (13, 90)
     if not (1 <= a.leverage <= 30):
         ap.error('--leverage must be between 1x and 30x')
 
@@ -112,23 +120,42 @@ def main() -> int:
             _, last_open_ms = core.scan_time_bounds(path)
 
     specs = plan_windows(
-        int(last_open_ms), windows=14, window_days=180,
-        skip_recent_days=180, warmup_days=a.warmup_days,
+        int(last_open_ms), windows=a.windows, window_days=a.window_days,
+        skip_recent_days=a.skip_recent_days, warmup_days=a.warmup_days,
     )
-    # The next older 180-day interval is deliberately not planned or loaded.
-    # It remains reserved for one final blind check if a candidate becomes
-    # materially stronger than breakeven on the inspected research corpus.
+
+    # Establish the earliest timestamp that the completed 14-window/60-day
+    # research run was already allowed to read. Stability testing must never go
+    # earlier than this boundary, otherwise it would consume new historical data.
+    original_specs = plan_windows(
+        int(last_open_ms), windows=14, window_days=180,
+        skip_recent_days=180, warmup_days=60,
+    )
+    historical_research_floor = min(int(s['warmup_start_ms']) for s in original_specs)
+
     earliest = min(int(s['warmup_start_ms']) for s in specs)
     latest = max(int(s['eval_end_ms']) for s in specs)
+    if earliest < historical_research_floor:
+        raise RuntimeError(
+            'requested run would load BTC history older than the already-inspected research boundary'
+        )
+
     workers = all_cpu_workers(a.workers)
 
     print('=' * 72)
-    print('Terminal 3 v2.5B RESEARCH BATTERY')
+    if stability_mode:
+        print('Terminal 3 v2.5B 90-DAY WARMUP STABILITY BATTERY')
+    else:
+        print('Terminal 3 v2.5B RESEARCH BATTERY')
     print('=' * 72)
-    print('Single strategy change vs candidate A: entries must be 2h or higher.')
+    print('Strategy is frozen: entries must be 2h or higher.')
     print('Everything else remains v2.4.2 Efficient.')
-    print('Research corpus: 14 already-inspected 180-day windows.')
-    print('The older reserved holdout is NOT loaded by this runner.')
+    if stability_mode:
+        print('Methodology-only check: 13 known windows, 90-day warmup.')
+        print('The oldest research window is omitted to avoid reading new early BTC history.')
+    else:
+        print('Research corpus: 14 already-inspected 180-day windows, 60-day warmup.')
+    print('No new pre-research BTC history is loaded by this runner.')
     print(f'CPU workers available: {workers}/{os.cpu_count() or 1}')
     print()
 
@@ -194,8 +221,17 @@ def main() -> int:
         'portfolio_margin_pct': a.portfolio_margin_pct,
     }
     summary['candidate'] = 'Terminal 3 v2.5B 2h-entry research candidate'
-    summary['research_status'] = 'NOT BLIND VALIDATION'
+    summary['research_status'] = (
+        'WARMUP STABILITY CHECK - NOT BLIND VALIDATION'
+        if stability_mode else 'NOT BLIND VALIDATION'
+    )
+    summary['warmup_days'] = a.warmup_days
     summary['reserved_holdout_consumed'] = False
+    summary['loaded_new_pre_research_history'] = False
+    summary['historical_research_floor_ms'] = historical_research_floor
+    summary['historical_research_floor'] = iso_ms(historical_research_floor)
+    summary['earliest_loaded_ms'] = earliest
+    summary['earliest_loaded'] = iso_ms(earliest)
     summary['load_seconds'] = round(load_seconds, 3)
     summary['replay_elapsed_seconds'] = round(replay_seconds, 3)
     summary['elapsed_seconds'] = round(time.perf_counter() - overall_started, 3)
@@ -205,10 +241,11 @@ def main() -> int:
     for r in sorted(reports, key=lambda x: int(x['oos_window_id'])):
         core.save_report(r, out / f'window_{int(r["oos_window_id"]):02d}')
     stamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
-    (out / f'v25b_research_summary_{stamp}.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+    prefix = 'v25b_stability90' if stability_mode else 'v25b_research'
+    (out / f'{prefix}_summary_{stamp}.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
 
     print('\n' + '=' * 72)
-    print('V2.5B RESEARCH BATTERY COMPLETE')
+    print('V2.5B STABILITY BATTERY COMPLETE' if stability_mode else 'V2.5B RESEARCH BATTERY COMPLETE')
     print('=' * 72)
     print(json.dumps({k: v for k, v in summary.items() if k != 'windows'}, indent=2))
     print(f'\nResults folder: {out}')
