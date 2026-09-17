@@ -30,6 +30,7 @@ for %%T in (
   backtest_efficiency_self_test.py
   backtest_oos_self_test.py
   backtest_v25_self_test.py
+  backtest_v25_chronological_self_test.py
   backtest_progress_self_test.py
   portfolio_cap_self_test.py
 ) do (
