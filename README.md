@@ -1,131 +1,76 @@
-# Terminal 3.0 · BloFin 30-Timeframe Bot v2.3
+# Terminal 3.0
 
-A BTC-USDT perpetual trading bot built from the Terminal 3.0 TA engine. It evaluates **30 timeframes**, lets every enabled timeframe create its own closed-candle trade candidate, and supports multiple independent positions through BloFin Hedge + Multi-Position mode.
+BTC-USDT perpetual trading bot plus an isolated research backtesting stack.
 
-## What changed in v2.3
+## Branch status
 
-The bot now generates an **automatic performance report every 3 hours while armed**. The reporting window starts when you arm the bot. After each report, a new 3-hour window begins automatically.
+- `main`: canonical v2.3 bot baseline.
+- `v2.5-research-engine`: current research branch. The production bot files are kept intact, but the active experiment is the v2.5 backtester. Research code is **not** treated as live-ready.
+- `VERSION` still refers to the production bot version, not the research candidate.
 
-Reports are saved locally under:
+## Current research candidate
 
-`logs/reports/`
+v2.5 keeps the v2.4.2 cost/risk protections and makes one structural change: only **1h+** signals may open positions. Lower timeframes still participate in technical context.
 
-Each cycle creates both JSON and Markdown versions, plus continuously updated `latest.json` and `latest.md` files.
+Run the research battery on Windows with:
 
-Every report includes:
+`RUN_V25_RESEARCH.bat`
 
-- trades opened and closed in the 3-hour window;
-- wins, losses and win rate;
-- realized P&L and average closed-trade P&L;
-- gross profit, gross loss and profit factor;
-- performance broken down by timeframe;
-- execution rejection count and the most common rejection reasons;
-- current equity and the equity change across the report window;
-- current open positions and planned open risk;
-- current all-timeframe direction, score and Minutes/Hours/Days/Weeks/Months horizon readings;
-- current signal-candidate and strategy-rejection counts.
+The runner expects a BTC 1-minute CSV and writes results to `backtest_results_v25_research/`.
 
-The dashboard shows a countdown to the next report, a compact summary of the most recent report, and a button to download the latest Markdown report.
+Research assumptions currently used by the candidate:
 
-## Fixed trading profile
+- 6 bps fee per side
+- 1 bp slippage per side
+- 30x leverage setting
+- 3.15x aggregate gross-notional cap
+- 45% portfolio margin budget
+- 0.16R maximum modeled round-trip friction
+- 1h minimum entry timeframe
 
-The bot uses one predetermined built-in profile rather than manual aggression controls:
+The inspected 2018-2025 windows are research data. They are not blind validation data anymore. One older holdout remains reserved.
 
-- Signal mode: `Aggressive`
-- Risk per new position: `1.45%` of equity
-- Leverage: `7x`
-- Max margin allocation used by position sizing: `45%`
-- Portfolio planned-risk cap: `11.5%` of equity
-- Minimum setup quality: `35%`
-- Minimum multi-timeframe confluence: `25%`
-- Base take-profit reference: `2.0R`, scaled slightly by horizon
-- No max-trades-per-day rule
-- No cooldown
-- Duplicate execution of the same `{timeframe, closed candle, side}` is prevented
+## Production bot
 
-Independent safety checks remain active: daily equity stop, spread filter, stale-entry/ATR slippage filter, stop-losses, portfolio-risk cap, exchange position limit and unresolved-order risk reservation.
+The production/PAPER bot still supports the 30-timeframe Terminal 3.0 signal engine and BloFin integration.
 
-## Timeframe universe
+Windows helpers:
 
-BloFin supplies these 15 intervals natively:
+- `START_BLOFIN_BOT.bat` — start the bot/dashboard
+- `CONFIGURE_BLOFIN.bat` — configure BloFin credentials locally
+- `RUN_SELF_TEST.bat` — run the current offline regression suite
 
-`1m 3m 5m 15m 30m 1H 2H 4H 6H 8H 12H 1D 3D 1W 1M`
+Do not commit `.env` or API credentials.
 
-The bot constructs another 15 from native OHLCV bars:
+## Repository layout
 
-`45m 3h 16h 2d 4d 5d 6d 2w 3w 2M 3M 4M 5M 6M 12M`
+Core runtime:
 
-The complete trading map is therefore:
+- `bot.py`, `app.py`, `automation.py`
+- `blofin_client.py`, `config.py`, `risk.py`, `reporting.py`
+- `strategy.py`, `ta_engine.py`
+- `static/`, `templates/`
 
-- Minutes: `1m 3m 5m 15m 30m 45m`
-- Hours: `1h 2h 3h 4h 6h 8h 12h 16h`
-- Days: `1d 2d 3d 4d 5d 6d`
-- Weeks: `1w 2w 3w`
-- Months: `1M 2M 3M 4M 5M 6M 12M`
+Research/backtesting:
 
-Constructed candles preserve open/high/low/close and aggregate volume fields. An incomplete constructed candle is marked forming and cannot create a permanent signal.
+- `backtest_v24.py` — base historical engine
+- `backtest_v24_guarded.py` — cost/profit/loss protection layer
+- `backtest_v24_selective.py` — anti-churn/rolling-edge layer
+- `backtest_v24_efficient.py` — 15m+ efficient baseline used by v2.5
+- `backtest_v25.py` — current 1h+ candidate
+- `backtest_v25_research.py` — 14-window research battery
+- `backtest_oos_v242.py` — shared window-planning/report helpers
+- `backtest_full_cpu_runner.py`, `backtest_progress_runner.py` — reusable parallel data/analysis helpers
+- `portfolio_cap.py` — shared exposure/margin-cap layer
 
-## Strategy architecture
+Historical one-off launchers and obsolete v2.1/v2.4 instructions are intentionally removed from this branch. They remain available in git history.
 
-There is no master 3-minute trigger. Any enabled timeframe can independently generate a BUY or SELL candidate when its just-closed candle creates a fresh Terminal signal.
+## Validation notes
 
-The engine scores each timeframe using:
+The v2.4.2 frozen candidate finished effectively around breakeven across the inspected OOS + holdout windows after modeled costs, so it was not considered robust enough for real money. See `docs/history/VALIDATION_V242_FINAL_HOLDOUT.md`.
 
-- Trend: EMA20/50/200, regression structure, ADX/+DI/-DI
-- Momentum: RSI, MACD, Stochastic, ROC
-- Structure: breakouts/breakdowns, Bollinger location, range structure
-- Flow: relative volume, VWAP, CMF and OBV pressure
-- Regime: trend, range, squeeze, breakout, high-volatility and mixed conditions
-
-To reduce fake confidence from correlated intervals, scores are summarized into **Minutes / Hours / Days / Weeks / Months** before being combined into the overall market context and each candidate's confluence score.
-
-## Multiple positions
-
-PAPER mode simulates independent positions locally and starts in multi-position behavior automatically.
-
-For DEMO/LIVE, arming the bot automatically checks BloFin account mode. If Hedge + Multi-Position is not already active, the bot requests it before trading. New opening orders omit `positionId`, allowing BloFin to create a separate position. The bot then resolves the generated `positionId` through Order Detail/current positions and tracks that position independently.
-
-BloFin currently documents a hard maximum of **10 positions per instrument** in Multi-Position mode. The bot does not add a smaller position-count or daily trade-count limit.
-
-## Dashboard
-
-The local UI includes live BTC price/spread and equity, overall 30-timeframe bias, one large selectable candlestick chart, Minutes / Hours / Days / Weeks / Months filters, per-timeframe AUTO switches, score/quality/agreement/setup/regime/RSI/ADX/data coverage, fixed-profile status, automatic Multi-Position status, 3-hour report countdown and summary, fresh candidate feed, multiple-position list, activity/error stream and trade/report exports.
-
-## Modes
-
-### PAPER
-Default. Uses BloFin public prices and simulates positions locally.
-
-### DEMO
-Uses BloFin demo trading and requires demo API credentials.
-
-### LIVE
-Requires all three gates:
-
-1. `BOT_ENV=live`
-2. `ALLOW_LIVE_TRADING=I_ACCEPT_LIVE_RISK`
-3. Type `LIVE` in the dashboard before arming
-
-## Windows start
-
-Run:
-
-`START_BLOFIN_BOT.bat`
-
-Configure BloFin locally with:
-
-`CONFIGURE_BLOFIN.bat`
-
-Do not commit or share `.env`.
+The next research gate is documented in `docs/V25_RESEARCH_PLAN.md`.
 
 ## Security
 
-Use a dedicated BloFin API key with **READ + TRADE only**. Do not grant TRANSFER permission. `.env`, logs, caches, reports and local state are ignored by git.
-
-## Tests
-
-Run:
-
-`python self_test.py`
-
-GitHub Actions compiles the project, validates the dashboard JavaScript and runs the offline self-test on pushes and pull requests.
+Use a dedicated exchange API key with only the permissions the bot actually needs. Never commit secrets. Real-money trading should remain disabled until the research candidate survives independent validation plus perpetual-specific funding, maintenance-margin, liquidation and execution modeling.

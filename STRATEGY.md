@@ -1,77 +1,36 @@
-# v2.2 strategy — fixed-profile 30-timeframe multi-position engine
+# Strategy status
 
-## 1. Timeframes
+## Production baseline
 
-The strategy evaluates 30 intervals.
+The runtime bot on this branch is still the v2.3 30-timeframe Terminal 3.0 system. `VERSION` therefore remains `2.3`. Research changes are isolated in the historical backtest classes and are not silently wired into LIVE trading.
 
-Native BloFin candles:
+## Current research candidate: v2.5
 
-`1m 3m 5m 15m 30m 1h 2h 4h 6h 8h 12h 1d 3d 1w 1M`
+v2.5 inherits the full v2.4.2 Efficient stack and changes one structural rule:
 
-Constructed locally from native OHLCV candles:
+**Only signals from 1h and higher may open positions.**
 
-`45m 3h 16h 2d 4d 5d 6d 2w 3w 2M 3M 4M 5M 6M 12M`
+The 1m/3m/5m/15m/30m data still participate in technical analysis and cross-timeframe context; they simply cannot create new v2.5 entries.
 
-Any enabled timeframe can create a trade. There is no master entry timeframe. A constructed interval cannot generate a permanent entry until enough closed source candles exist to complete that constructed bar.
+Inherited controls include:
 
-## 2. Predetermined trading profile
+- modeled fees and slippage in trade economics;
+- maximum round-trip friction of 0.16R;
+- minimum net-target hurdle inherited from the selective layer;
+- rolling closed-trade edge throttling;
+- drawdown-based new-risk reduction and lockout;
+- portfolio planned-risk limits;
+- aggregate gross-notional and margin-use caps;
+- staged stop protection, breakeven/trailing and time exits.
 
-v2.2 deliberately removes dashboard aggression controls. The strategy uses one fixed profile:
+The current research runner uses 6 bps fee + 1 bp slippage per side, a 30x leverage setting, 3.15x aggregate gross exposure cap and 45% margin budget. Under that gross cap, 30x changes margin efficiency rather than allowing 30x account notional.
 
-- Signal mode: Aggressive
-- Risk/trade: 1.45% of equity
-- Leverage: 7x
-- Max margin use in sizing: 45%
-- Portfolio planned-risk cap: 11.5%
-- Minimum quality: 35%
-- Minimum confluence: 25%
-- Base target: 2.0R, adjusted slightly by horizon
+## Validation status
 
-These are code-level strategy constants rather than runtime UI or `.env` controls.
+v2.4.2 did not clear its final robustness gate. Across the inspected independent windows it was approximately breakeven after costs, which is too execution-sensitive to treat as a reliable edge.
 
-## 3. Technical score
+Those inspected windows are now research data for v2.5. The v2.5 candidate must be frozen before the final reserved historical holdout is touched.
 
-Each timeframe receives a roughly -100 to +100 score built from four independent families:
+Even a successful historical holdout will not make the system live-ready. Remaining validation work includes perpetual-specific funding, maintenance margin/liquidation, execution realism, gap handling, and demo/PAPER behavior.
 
-- **Trend — 32%:** EMA20/50/200 structure, regression slope and ADX directional pressure.
-- **Momentum — 23%:** RSI, MACD histogram, Stochastic and ROC.
-- **Structure — 27%:** breakout/breakdown behavior, range position, Bollinger location and regression structure.
-- **Flow — 18%:** relative volume, VWAP position, OBV pressure and CMF.
-
-The Aggressive signal model reduces the score threshold and slightly increases score sensitivity, while execution/risk guards remain independent.
-
-## 4. Regime detection
-
-The engine distinguishes conditions such as BREAKOUT UP / BREAKOUT DOWN, TREND UP / TREND DOWN, RANGE, SQUEEZE, HIGH VOLATILITY and MIXED. Range signals generally need breakout confirmation unless quality is unusually high. Severe EMA20/ATR overextension is also penalized.
-
-## 5. Hierarchical multi-timeframe model
-
-Thirty correlated intervals are not treated as 30 independent votes. They are summarized first into five horizons:
-
-- **Minutes:** 1m / 3m / 5m / 15m / 30m / 45m
-- **Hours:** 1h / 2h / 3h / 4h / 6h / 8h / 12h / 16h
-- **Days:** 1d / 2d / 3d / 4d / 5d / 6d
-- **Weeks:** 1w / 2w / 3w
-- **Months:** 1M / 2M / 3M / 4M / 5M / 6M / 12M
-
-The current horizon weights are Minutes 14%, Hours 29%, Days 28%, Weeks 16% and Months 13%. Coverage and per-timeframe importance modify effective contribution. A candidate's confluence combines its own horizon, whole-market score and higher-horizon context.
-
-## 6. Entry trigger
-
-A candidate exists only when a **closed candle** on an enabled timeframe creates a fresh Terminal score-cross, breakout or breakdown marker. The key `{timeframe, candle timestamp, side}` is stored after execution so polling cannot repeatedly place the same trade. That is duplicate protection, not a frequency limit.
-
-## 7. Automatic multiple positions
-
-PAPER mode always uses independent simulated positions.
-
-For DEMO/LIVE there is no manual Multi-Position button. When the user arms the bot, it automatically checks BloFin account mode. If Hedge + Multi-Position is not active, the bot requests it before entering trades. If BloFin rejects the mode change because positions/orders are open, arming fails visibly instead of silently switching to single-position behavior.
-
-New opening orders omit `positionId`, so each accepted setup can create its own independent position. The bot resolves the generated `positionId` through BloFin Order Detail/current positions, records it, and uses that ID when an individual bot-owned position must be closed.
-
-Pending position-ID resolution reserves the trade's planned risk so a temporarily unresolved fill cannot let the next trade bypass the portfolio-risk cap. BloFin's exchange-level Multi-Position limit remains 10 positions per instrument.
-
-## 8. Risk and execution
-
-There is no max-trades-per-day rule and no cooldown. New signals may trade whenever they pass the model and execution checks.
-
-Risk remains controlled by account-risk sizing, the fixed 11.5% portfolio planned-risk cap, daily equity stop, spread filter, stale-entry / ATR slippage filter, server-side mark-price stop-loss and take-profit, exchange position limit, duplicate-signal prevention and unresolved-order risk reservation.
+See `docs/V25_RESEARCH_PLAN.md` and `docs/history/VALIDATION_V242_FINAL_HOLDOUT.md` for the current research gate and prior result.

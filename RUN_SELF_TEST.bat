@@ -1,54 +1,61 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 cd /d "%~dp0"
-title Terminal 3.0 BloFin Bot - Self Test
+title Terminal 3 - Full Self Test
 
-echo ========================================
-echo Terminal 3.0 BloFin Bot - Self Test
-echo ========================================
-echo.
+set "PY=.venv\Scripts\python.exe"
+if exist "%PY%" goto :deps
 
-set PYEXE=
-where py.exe >nul 2>nul && set PYEXE=py -3
-if not defined PYEXE (
-  where python.exe >nul 2>nul && set PYEXE=python
-)
-if not defined PYEXE (
-  echo ERROR: Python was not found.
-  echo Install Python 3.11+ and run this file again.
-  goto :fail
-)
+where py.exe >nul 2>nul
+if errorlevel 1 goto :try_python
+py -3 -m venv .venv
+if errorlevel 1 goto :fail
+goto :deps
 
-if not exist ".venv\Scripts\python.exe" (
-  echo [1/3] Creating local Python environment...
-  %PYEXE% -m venv .venv
+:try_python
+where python.exe >nul 2>nul
+if errorlevel 1 goto :no_python
+python -m venv .venv
+if errorlevel 1 goto :fail
+
+:deps
+"%PY%" -m pip install --disable-pip-version-check -q -r requirements.txt
+if errorlevel 1 goto :fail
+
+for %%T in (
+  self_test.py
+  backtest_self_test.py
+  backtest_guard_self_test.py
+  backtest_selective_self_test.py
+  backtest_efficiency_self_test.py
+  backtest_oos_self_test.py
+  backtest_v25_self_test.py
+  backtest_progress_self_test.py
+  portfolio_cap_self_test.py
+) do (
+  echo Running %%T...
+  "%PY%" %%T
   if errorlevel 1 goto :fail
-) else (
-  echo [1/3] Local Python environment found.
 )
 
-echo [2/3] Installing/repairing required packages...
-".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q -r requirements.txt
-if errorlevel 1 goto :fail
-
-echo [3/3] Running bot self-test...
-echo.
-".venv\Scripts\python.exe" self_test.py
+echo Running full CPU pipeline self-test...
+"%PY%" backtest_full_cpu_runner.py --self-test
 if errorlevel 1 goto :fail
 
 echo.
 echo ========================================
-echo SELF CHECK PASSED
- echo The local environment and offline bot tests are OK.
+echo ALL CURRENT SELF TESTS PASSED
 echo ========================================
 pause
 exit /b 0
 
+:no_python
+echo ERROR: Python was not found. Install Python 3.11+.
+
 :fail
 echo.
 echo ========================================
-echo SELF CHECK FAILED
- echo Review the error above. The test did not pass.
+echo SELF TEST FAILED
 echo ========================================
 pause
 exit /b 1

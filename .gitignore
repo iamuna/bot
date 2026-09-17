@@ -24,6 +24,7 @@ cache/
 # Backtesting data/results
 backtest_data/
 backtest_results/
+backtest_results*/
 
 # Exports / generated trading data
 trade_log*.csv
