@@ -90,9 +90,11 @@ def run_with_progress(bt, label: str, show_progress: bool = True, refresh_second
         print(
             f'Portfolio cap: total margin <= {portfolio_cap.PORTFOLIO_MARGIN_USE_PCT:.0f}% of MTM equity; '
             f'gross notional <= {portfolio_cap.PORTFOLIO_GROSS_NOTIONAL_X:.2f}x MTM equity; '
-            f'leverage={core.LEVERAGE:.0f}x.',
+            f'leverage setting={core.LEVERAGE:.0f}x; '
+            f'effective gross cap={portfolio_cap.effective_gross_cap_x():.2f}x.',
             flush=True,
         )
+        print('Liquidation mechanics are not modeled in this research pass.', flush=True)
     emit(0, force=True)
 
     for n, bar in enumerate(bt.base, 1):
@@ -149,6 +151,7 @@ def _summary(report):
         'leverage', 'portfolio_margin_cap_pct', 'portfolio_gross_notional_cap_x',
         'effective_gross_cap_x', 'max_gross_notional_x_equity',
         'max_margin_used_pct', 'portfolio_cap_rejections',
+        'portfolio_cap_scaled_entries', 'liquidation_modeled',
         'peak_equity', 'profit_giveback_pct', 'cost_rejections',
         'risk_throttled_entries', 'max_loss_streak',
     ]
@@ -166,7 +169,24 @@ def main():
     ap.add_argument('--last-days', type=float, default=180.0)
     ap.add_argument('--out', default='backtest_results')
     ap.add_argument('--mode', choices=['base', 'guarded', 'compare'], default='compare')
+    ap.add_argument('--leverage', type=float, default=30.0, help='research leverage setting; capped at 30x by this runner')
+    ap.add_argument('--gross-cap-x', type=float, default=3.15, help='account-wide gross notional cap as multiple of MTM equity')
+    ap.add_argument('--portfolio-margin-pct', type=float, default=45.0, help='account-wide initial-margin budget as percent of MTM equity')
     a = ap.parse_args()
+
+    if not (1.0 <= a.leverage <= 30.0):
+        ap.error('--leverage must be between 1x and 30x for this research runner')
+    if not (0.1 <= a.gross_cap_x <= 10.0):
+        ap.error('--gross-cap-x must be between 0.1x and 10x')
+    if not (1.0 <= a.portfolio_margin_pct <= 100.0):
+        ap.error('--portfolio-margin-pct must be between 1 and 100')
+
+    # Leverage is now an explicit test parameter instead of a hard-coded 7x
+    # assumption. Gross exposure stays separately capped, so moving to 30x
+    # cannot silently turn a 3.15x exposure envelope into 13.5x exposure.
+    core.LEVERAGE = float(a.leverage)
+    portfolio_cap.PORTFOLIO_GROSS_NOTIONAL_X = float(a.gross_cap_x)
+    portfolio_cap.PORTFOLIO_MARGIN_USE_PCT = float(a.portfolio_margin_pct)
 
     path = Path(a.csv)
     print('Scanning data range...', flush=True)
@@ -178,6 +198,14 @@ def main():
     load_started = time.perf_counter()
     base = core.load_1m_csv(path, start_ms, end_ms)
     print(f'Loaded {len(base):,} candles in {_fmt_seconds(time.perf_counter() - load_started)}.', flush=True)
+
+    print(
+        f'Risk envelope: leverage={core.LEVERAGE:.0f}x, '
+        f'gross cap={portfolio_cap.PORTFOLIO_GROSS_NOTIONAL_X:.2f}x equity, '
+        f'margin budget={portfolio_cap.PORTFOLIO_MARGIN_USE_PCT:.0f}%, '
+        f'effective cap={portfolio_cap.effective_gross_cap_x():.2f}x equity.',
+        flush=True,
+    )
 
     shared_data = build_dataset_with_progress(base, show_progress=True)
     out = Path(a.out)
