@@ -5,28 +5,29 @@ BTC-USDT perpetual trading bot plus an isolated research backtesting stack.
 ## Branch status
 
 - `main`: canonical v2.3 bot baseline.
-- `v2.5-research-engine`: current research branch. The production bot files are kept intact, but the active experiment is the v2.5B backtester. Research code is **not** treated as live-ready.
+- `v2.5-research-engine`: current research branch. The production bot files are kept intact, but the active experiment is the frozen v2.5B backtester. Research code is **not** treated as live-ready.
 - `VERSION` still refers to the production bot version, not the research candidate.
 
 ## Current research candidate
 
-v2.5B keeps the v2.4.2 cost/risk protections and makes one structural change from v2.5A: only **2h+** signals may open positions. Lower timeframes still participate in technical context.
+v2.5B keeps the v2.4.2 cost/risk protections and allows only **2h+** signals to open positions. Lower timeframes still participate in technical context.
 
-Candidate A used a 1h floor and remained essentially breakeven after costs on the 14 inspected research windows: pooled PF 1.0023, +$8.63 net, 11/14 positive windows and 8,273 trades.
+Candidate A (1h+) remained essentially breakeven after costs. Candidate B (2h+) was materially stronger on the original 14 inspected windows: 11/14 positive, +$155.42 independent net PnL, PF 1.0660, 2,696 trades and $194.22 modeled fees.
 
-Candidate B was materially stronger on the same 14 inspected windows: **11/14 positive, +$155.42 independent net PnL, PF 1.0660, 2,696 trades, $194.22 modeled fees, and a -9.19% worst window**. The detailed result is stored in `docs/history/V25B_2H_RESEARCH_RESULT.md`.
+The follow-up **90-day warm-up stability check** reran the same 13 safe, already-seen windows and improved to **10/13 positive, +$224.93 net, PF 1.1054, 2,502 trades, $174.00 fees, and -7.10% worst window**. All 13 windows kept the same positive/negative sign versus the 60-day warm-up comparison. See `docs/history/V25B_90D_STABILITY_RESULT.md`.
 
-The strategy is now frozen while warm-up methodology is checked. Run:
+The strategy and 90-day warm-up methodology are now frozen. The next run is the final untouched early-data validation:
 
-`RUN_V25_STABILITY_90D.bat`
+`RUN_V25_FINAL_VALIDATION.bat`
 
-That reruns **13 already-seen research windows** with a 90-day no-trade warm-up. The oldest research window is deliberately omitted so the stability check cannot load BTC history earlier than the original research run already used. Results are written to `backtest_results_v25b_stability_90d/`.
+This runner automatically uses the earliest available BTC history for a 90-day no-trade warm-up, then evaluates only candles that end **strictly before the first timestamp ever loaded by the original v2.5 research run**. It refuses to overlap the known research-history boundary. Results are written to `backtest_results_v25b_final_validation/`.
 
-The original 14-window/60-day candidate-B run remains reproducible with:
+The original research/stability runs remain reproducible with:
 
-`RUN_V25_RESEARCH.bat`
+- `RUN_V25_RESEARCH.bat` — original 14-window/60-day candidate-B research battery
+- `RUN_V25_STABILITY_90D.bat` — safe 13-window/90-day stability battery
 
-Research assumptions currently used by the candidate:
+Research assumptions currently used by the frozen candidate:
 
 - 6 bps fee per side
 - 1 bp slippage per side
@@ -35,8 +36,7 @@ Research assumptions currently used by the candidate:
 - 45% portfolio margin budget
 - 0.16R maximum modeled round-trip friction
 - 2h minimum entry timeframe
-
-The inspected 2018-2025 windows are research data. The original idea of a full untouched 180-day holdout immediately before the oldest research window was corrected: its final 60 days had already been used as indicator warm-up. The cleanest untouched historical segment is therefore the earlier data before the original research-history boundary, and the final validation interval will be defined there only after warm-up methodology is frozen.
+- 90-day final-validation warm-up
 
 ## Production bot
 
@@ -65,8 +65,9 @@ Research/backtesting:
 - `backtest_v24_guarded.py` — cost/profit/loss protection layer
 - `backtest_v24_selective.py` — anti-churn/rolling-edge layer
 - `backtest_v24_efficient.py` — 15m+ efficient baseline used by v2.5
-- `backtest_v25.py` — current frozen 2h+ candidate
+- `backtest_v25.py` — frozen 2h+ candidate
 - `backtest_v25_research.py` — locked research/stability battery
+- `backtest_v25_final_validation.py` — untouched early-data validation runner
 - `backtest_oos_v242.py` — shared window-planning/report helpers
 - `backtest_full_cpu_runner.py`, `backtest_progress_runner.py` — reusable parallel data/analysis helpers
 - `portfolio_cap.py` — shared exposure/margin-cap layer
@@ -75,10 +76,12 @@ Historical one-off launchers and obsolete v2.1/v2.4 instructions are intentional
 
 ## Validation notes
 
-The v2.4.2 frozen candidate finished effectively around breakeven across the inspected OOS + holdout windows after modeled costs. Candidate v2.5A also remained effectively breakeven. v2.5B is the first candidate with a meaningfully positive research margin, but it is still execution-sensitive and has not yet received a clean final validation run on untouched early data.
+v2.4.2 and v2.5A were approximately breakeven after costs. v2.5B is the first candidate with a materially positive research margin and has now passed the warm-up stability gate. It still has not passed its final untouched early-data validation, and even a successful result will not make it live-ready.
 
-The current research gate is documented in `docs/V25_RESEARCH_PLAN.md`.
+Remaining work after historical validation includes perpetual-specific funding, maintenance margin/liquidation, execution realism, gap handling, continuous chronological replay, and demo/PAPER behavior.
+
+The current gate is documented in `docs/V25_RESEARCH_PLAN.md`.
 
 ## Security
 
-Use a dedicated exchange API key with only the permissions the bot actually needs. Never commit secrets. Real-money trading should remain disabled until the research candidate survives independent validation plus perpetual-specific funding, maintenance-margin, liquidation and execution modeling.
+Use a dedicated exchange API key with only the permissions the bot actually needs. Never commit secrets. Real-money trading should remain disabled until the research candidate survives independent validation plus perpetual-specific execution and liquidation modeling.
