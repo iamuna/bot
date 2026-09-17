@@ -5,7 +5,7 @@ from backtest_v25 import V25_CONFIG
 
 
 def main() -> int:
-    assert V25_CONFIG.min_entry_timeframe_minutes == 60
+    assert V25_CONFIG.min_entry_timeframe_minutes == 120
     assert abs(V25_CONFIG.max_round_trip_cost_r - 0.16) < 1e-12
 
     # Synthetic last timestamp. Fourteen research windows must be contiguous
@@ -21,7 +21,7 @@ def main() -> int:
     assert reserved_end < int(specs[-1]['eval_start_ms'])
     assert reserved_start < reserved_end
 
-    print('V2.5 SELF TEST OK: 1h entry floor and reserved holdout boundary')
+    print('V2.5 SELF TEST OK: 2h entry floor and reserved holdout boundary')
     return 0
 
 
