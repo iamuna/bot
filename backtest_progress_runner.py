@@ -8,6 +8,11 @@ from pathlib import Path
 import backtest_v24 as core
 from backtest_v24_guarded import GuardedBacktester
 from ta_engine import analyze_latest
+import portfolio_cap
+
+# Install one shared account-level margin/notional budget for BOTH the base and
+# guarded engines before either backtester is constructed.
+portfolio_cap.install()
 
 
 def _fmt_seconds(seconds: float | None) -> str:
@@ -65,15 +70,29 @@ def run_with_progress(bt, label: str, show_progress: bool = True, refresh_second
         rate = done / elapsed
         remaining = (total - done) / rate if rate > 0 else None
         pct = 100.0 * done / total if total else 100.0
+        if total:
+            px = float(bt.base[max(0, min(done - 1, total - 1))]['c']) if done else float(bt.base[0]['o'])
+            exposure = portfolio_cap.current_exposure(bt, px)
+            gross_x = exposure['gross_notional_x_equity']
+            margin_pct = exposure['margin_used_pct']
+        else:
+            gross_x = 0.0; margin_pct = 0.0
         msg = (
             f'[{label}] {pct:6.2f}%  {done:,}/{total:,} candles  '
             f'{rate:,.0f} candles/s  elapsed={_fmt_seconds(elapsed)}  ETA={_fmt_seconds(remaining)}  '
-            f'trades={len(bt.closed):,}  open={len(bt.positions)}  equity=${bt.equity:,.2f}'
+            f'trades={len(bt.closed):,}  open={len(bt.positions)}  equity=${bt.equity:,.2f}  '
+            f'gross={gross_x:.2f}x  margin={margin_pct:.1f}%'
         )
-        print('\r' + msg.ljust(160), end='', flush=True)
+        print('\r' + msg.ljust(190), end='', flush=True)
 
     if show_progress:
         print(f'Running {label} simulation...', flush=True)
+        print(
+            f'Portfolio cap: total margin <= {portfolio_cap.PORTFOLIO_MARGIN_USE_PCT:.0f}% of MTM equity; '
+            f'gross notional <= {portfolio_cap.PORTFOLIO_GROSS_NOTIONAL_X:.2f}x MTM equity; '
+            f'leverage={core.LEVERAGE:.0f}x.',
+            flush=True,
+        )
     emit(0, force=True)
 
     for n, bar in enumerate(bt.base, 1):
@@ -127,6 +146,9 @@ def _summary(report):
     keys = [
         'start_equity', 'end_equity', 'return_pct', 'trades', 'win_rate_pct',
         'profit_factor', 'max_drawdown_pct', 'avg_r', 'fees_paid', 'rejections',
+        'leverage', 'portfolio_margin_cap_pct', 'portfolio_gross_notional_cap_x',
+        'effective_gross_cap_x', 'max_gross_notional_x_equity',
+        'max_margin_used_pct', 'portfolio_cap_rejections',
         'peak_equity', 'profit_giveback_pct', 'cost_rejections',
         'risk_throttled_entries', 'max_loss_streak',
     ]
