@@ -7,7 +7,7 @@ Last updated: 2026-09-17
 - Research branch: `v2.5-research-engine`
 - Production baseline on `main`: v2.3
 - Current research candidate: **v2.5B**
-- Candidate status: **frozen for validation**
+- Candidate status: **frozen; historical validation completed**
 - Research code is not considered live-ready.
 
 ## Current candidate
@@ -23,13 +23,13 @@ Frozen research assumptions:
 - aggregate gross-notional cap: 3.15x
 - portfolio margin budget: 45%
 - maximum modeled round-trip friction: 0.16R
-- final-validation warm-up: 90 days
+- warm-up methodology: 90 days
 
-No timeframe, threshold, risk, exit, fee, slippage, leverage, portfolio-cap, or warm-up tuning should be performed before the final untouched validation is recorded.
+Do not tune timeframe, threshold, risk, exit, fee, slippage, leverage, portfolio-cap, or warm-up settings against the consumed validation interval.
 
-## Last completed research gate
+## Completed research gates
 
-**90-day warm-up stability gate: PASSED**
+### 90-day warm-up stability gate — PASSED
 
 Result on the 13 already-seen safe research windows:
 
@@ -46,60 +46,65 @@ Result on the 13 already-seen safe research windows:
 
 The strategy and 90-day warm-up methodology were frozen after this gate.
 
+### Final untouched early-data validation — COMPLETED
+
+The one-time early holdout was run with the frozen candidate and produced a positive independent result:
+
+- evaluation: 2017-11-15 04:00 UTC through 2018-03-22 11:01 UTC
+- original research-history floor: 2018-03-22 11:02 UTC
+- overlap with previous v2.5 research history: false
+- start equity: $1,000.00
+- end equity: $1,059.46
+- return: **+5.95%**
+- net PnL: **+$59.46**
+- trades: 134
+- win rate: 53.73%
+- profit factor: **1.387**
+- max drawdown: **5.62%**
+- average R: **+0.177**
+- modeled fees: $7.17
+
+No numeric pass/fail threshold had been pre-registered for this gate, so preserve the result descriptively. The interval is now **consumed** and must never again be described as blind validation data for v2.5B.
+
+Full record:
+
+- `docs/history/V25B_FINAL_UNTOUCHED_VALIDATION_RESULT.md`
+- `docs/history/V25B_FINAL_UNTOUCHED_VALIDATION_SUMMARY.json`
+
 ## Current gate / next exact action
 
-### Before consuming the untouched validation interval
+### Continuous chronological replay over the full available BTC history
 
-Harden `backtest_v25_final_validation.py` so the frozen validation assumptions cannot be changed while still producing a report labeled `candidate_frozen: true`.
+Purpose: audit whether the candidate's behavior is materially affected by the reset/warm-up structure used by the independent research windows and verify performance through changing market regimes in one uninterrupted stateful replay.
 
-The official final-validation values must be fixed to:
+Requirements:
 
-- fee: 6 bps per side
-- slippage: 1 bp per side
-- leverage: 30x
-- aggregate gross cap: 3.15x
-- portfolio margin budget: 45%
-- warm-up: 90 days
+1. Keep v2.5B strategy parameters frozen.
+2. Use the same 90-day initial no-trade warm-up.
+3. After warm-up, replay the remaining dataset continuously with no periodic state resets.
+4. Preserve all normal fees, slippage, risk controls, exits, leverage and portfolio caps.
+5. Report full-history aggregate performance plus chronological period breakdowns so regime concentration is visible.
+6. Add visible replay progress and ETA; progress instrumentation must not alter trading calculations.
+7. Treat this as a historical audit, **not** a new blind validation test, because the dataset has already been inspected.
 
-The warm-up is already equality-locked. The remaining frozen values should be hard-locked as well.
+Do not use the chronological replay to silently optimize the current frozen candidate. Any future strategy revision must become a new named candidate and require genuinely fresh independent data for its next out-of-sample test.
 
-### Then run exactly once
+## After chronological replay
 
-Run:
+Planned sequence:
 
-`RUN_V25_FINAL_VALIDATION.bat`
-
-Input: BTC 1-minute CSV.
-
-Protocol:
-
-1. Use the earliest available BTC history for the locked 90-day no-trade warm-up.
-2. Evaluate only candles strictly earlier than the first timestamp ever loaded by the original v2.5 research process.
-3. Record the result whether favorable or unfavorable.
-4. Do not retune the candidate against that interval and later describe it as blind validation.
-5. After this run, no historical BTC period in the current CSV remains untouched for v2.5B.
-
-Results are written to:
-
-`backtest_results_v25b_final_validation/`
-
-## What comes after final validation
-
-Regardless of the final-validation result, preserve it as a historical record. The planned sequence after that is:
-
-1. Run a continuous chronological replay over the full available history to audit reset/warm-up artifacts.
-2. Add perpetual-specific funding modeling.
-3. Add maintenance-margin and liquidation modeling.
-4. Improve execution realism and gap handling.
-5. Obtain genuinely fresh data or exchange-specific perpetual history for another independent out-of-sample test.
-6. Move to demo/PAPER validation only after those layers are complete.
-7. Real-money deployment remains out of scope until validation and execution modeling are complete.
+1. Add perpetual-specific funding modeling.
+2. Add maintenance-margin and liquidation modeling.
+3. Improve execution realism and gap handling.
+4. Obtain genuinely fresh BTC history or exchange-specific perpetual history for another independent out-of-sample test.
+5. Align demo/PAPER execution with the research assumptions and validate behavior prospectively.
+6. Real-money deployment remains out of scope until validation and execution modeling are complete.
 
 ## Known engineering issues / follow-up work
 
-These are separate from the frozen strategy and should not be confused with strategy tuning:
+These are separate from strategy tuning:
 
-- `backtest_v25_final_validation.py` currently exposes several supposedly frozen assumptions as CLI arguments; hard-lock them before the one-time untouched validation.
+- The final-validation runner still exposes some frozen assumptions as CLI parameters. The official run used the intended frozen values; future reruns are reproduction only. Hard-lock/relabel that runner before treating it as a reproducibility utility.
 - The production/PAPER bot on `main` is still the v2.3 runtime, not the v2.5B research candidate.
 - PAPER execution is not yet a faithful validation of the research cost model; fees/slippage/funding and execution behavior need alignment before PAPER results are compared directly with backtests.
 - Live bot ownership/order state is primarily runtime memory and needs stronger restart recovery/persistence before real-money use.
@@ -114,7 +119,8 @@ Use these to reconstruct project state in a future chat/session:
 - `docs/V25_RESEARCH_PLAN.md` — research methodology, decisions, and validation sequence
 - `docs/history/V25A_1H_RESEARCH_RESULT.md` — candidate A result
 - `docs/history/V25B_2H_RESEARCH_RESULT.md` — original candidate B result
-- `docs/history/V25B_90D_STABILITY_RESULT.md` — latest completed stability result
+- `docs/history/V25B_90D_STABILITY_RESULT.md` — warm-up stability result
+- `docs/history/V25B_FINAL_UNTOUCHED_VALIDATION_RESULT.md` — consumed independent validation result
 - `README.md` — repository overview and branch status
 - Git commit history — chronological implementation record
 
