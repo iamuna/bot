@@ -21,6 +21,10 @@ cache/
 *.sqlite3
 *.db
 
+# Backtesting data/results
+backtest_data/
+backtest_results/
+
 # Exports / generated trading data
 trade_log*.csv
 trades*.csv
