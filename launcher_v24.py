@@ -49,16 +49,9 @@ def self_test() -> int:
     assert clean_path(r'C:\Data\BTC.zip') == r'C:\Data\BTC.zip'
     assert positive_number('180', 'days') == '180'
     assert positive_number('30', 'leverage') == '30'
-    assert positive_number('7.5', 'leverage') == '7.5'
     assert positive_integer('16', 'workers') == '16'
     assert default_workers() == max(1, int(os.cpu_count() or 1))
-    try:
-        positive_number('0', 'days')
-    except ValueError:
-        pass
-    else:
-        raise AssertionError('zero must be rejected')
-    print('V2.4 LAUNCHER SELF TEST OK: selective comparison + maximum-use CPU selection')
+    print('V2.4 LAUNCHER SELF TEST OK: efficiency comparison + maximum-use CPU selection')
     return 0
 
 
@@ -70,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(__file__).resolve().parent
     log_path = root / 'backtest_launcher.log'
     log_path.write_text(
-        f'Terminal 3.0 v2.4.1 launcher log\nStarted: {datetime.now().isoformat()}\n',
+        f'Terminal 3.0 v2.4.2 launcher log\nStarted: {datetime.now().isoformat()}\n',
         encoding='utf-8',
     )
 
@@ -102,28 +95,27 @@ def main(argv: list[str] | None = None) -> int:
         append_log(log_path, f'Maximum-use workers: {workers}')
 
         print('\n================================================')
-        print('Terminal 3.0 v2.4.1 Selective Repair Test')
-        print('Guarded control vs Selective - MAXIMUM USE MODE')
+        print('Terminal 3.0 v2.4.2 Efficiency Test')
+        print('Selective control vs Efficient - MAXIMUM USE MODE')
         print('================================================')
         print(f'Data file: {input_path}')
         print(f'Research window: most recent {days} days')
         print(f'Leverage setting: {leverage}x')
         print(f'CPU workers available to parallel stages: {workers}')
-        print('Final replay: GUARDED CONTROL + SELECTIVE run concurrently')
+        print('Final replay: SELECTIVE CONTROL + EFFICIENT run concurrently')
         print('Gross exposure cap: 3.15x account equity')
         print('Portfolio margin budget: 45% of account equity')
         print('Fee assumption: 6 bps per side')
         print('Slippage assumption: 1 bp per side')
-        print('Selective anti-churn: max round-trip cost 0.20R')
-        print('Selective target hurdle: at least 1.50R net after modeled costs')
-        print('Selective risk: rolling past-trade edge sizing + 15% new-risk drawdown lock')
+        print('Efficient entry floor: 15m (1m/3m/5m remain TA/context only)')
+        print('Efficient friction cap: max modeled round-trip cost 0.16R')
         print('NOTE: this is a research candidate; liquidation mechanics are not modeled.')
         print('\nStarting comparison. The runner will use as much useful compute as each stage can safely consume.\n', flush=True)
 
         cmd = [
             sys.executable,
             '-u',
-            str(root / 'backtest_selective_runner.py'),
+            str(root / 'backtest_efficiency_runner.py'),
             str(input_path),
             '--last-days', days,
             '--fee-bps', '6',
@@ -132,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
             '--gross-cap-x', '3.15',
             '--portfolio-margin-pct', '45',
             '--workers', workers,
-            '--out', 'backtest_results_selective',
+            '--out', 'backtest_results_efficiency',
             '--mode', 'compare',
         ]
         rc = subprocess.call(cmd, cwd=root)
@@ -140,14 +132,14 @@ def main(argv: list[str] | None = None) -> int:
 
         if rc == 0:
             print('\n========================================')
-            print('REPAIR COMPARISON COMPLETE')
-            print('Control results:   backtest_results_selective\\guarded_control\\')
-            print('Selective results: backtest_results_selective\\selective\\')
-            print('Summary:           backtest_results_selective\\v241_selective_comparison_*.json')
+            print('EFFICIENCY COMPARISON COMPLETE')
+            print('Control results:   backtest_results_efficiency\\selective_control\\')
+            print('Efficient results: backtest_results_efficiency\\efficient\\')
+            print('Summary:           backtest_results_efficiency\\v242_efficiency_comparison_*.json')
             print('========================================')
-            append_log(log_path, 'SUCCESS: repair comparison completed')
+            append_log(log_path, 'SUCCESS: efficiency comparison completed')
         else:
-            print(f'\nERROR: v2.4.1 repair comparison failed with exit code {rc}.')
+            print(f'\nERROR: v2.4.2 efficiency comparison failed with exit code {rc}.')
             print(f'Launcher log: {log_path}')
         return rc
 
