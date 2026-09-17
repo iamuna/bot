@@ -71,6 +71,8 @@ Full record:
 - `docs/history/V25B_FINAL_UNTOUCHED_VALIDATION_RESULT.md`
 - `docs/history/V25B_FINAL_UNTOUCHED_VALIDATION_SUMMARY.json`
 
+The old `RUN_V25_FINAL_VALIDATION.bat` path is now retained only as a **hard-locked historical reproduction** utility. It labels reruns as reproductions and rejects changes to the frozen equity, fee, slippage, leverage, portfolio-cap and warm-up settings.
+
 ## Current gate / next exact action
 
 ### Continuous chronological replay over the full available BTC history
@@ -112,7 +114,6 @@ Planned sequence:
 
 These are separate from strategy tuning:
 
-- The final-validation runner still exposes some frozen assumptions as CLI parameters. The official run used the intended frozen values; future reruns are reproduction only. Hard-lock/relabel that runner before treating it as a reproducibility utility.
 - The production/PAPER bot on `main` is still the v2.3 runtime, not the v2.5B research candidate.
 - PAPER execution is not yet a faithful validation of the research cost model; fees/slippage/funding and execution behavior need alignment before PAPER results are compared directly with backtests.
 - Live bot ownership/order state is primarily runtime memory and needs stronger restart recovery/persistence before real-money use.
