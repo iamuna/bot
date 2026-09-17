@@ -37,7 +37,7 @@ See `history/V25B_2H_RESEARCH_RESULT.md`.
 
 The original v2.5 plan described the 180 days immediately before the oldest research evaluation window as a future blind holdout. That was too strong: the oldest research window used a 60-day no-trade warm-up, so the final 60 days of that earlier interval were already loaded into indicator state. They were not traded, but their prices influenced research-window indicators.
 
-The original 14-window/60-day research run first loaded early BTC history at approximately **2018-03-22 11:02 UTC**. Data earlier than that timestamp is the clean untouched segment remaining in this CSV.
+The original 14-window/60-day research run first loaded early BTC history at approximately **2018-03-22 11:02 UTC**. Data earlier than that timestamp was the clean untouched segment remaining in this CSV before the final validation run.
 
 ## Warm-up stability gate — PASSED
 
@@ -58,31 +58,71 @@ Result:
 
 For the same 13 windows, the original 60-day warm-up produced about +$133.36 and PF 1.0590. All 13 windows preserved their positive/negative sign when warm-up changed, with return correlation about 0.859. Magnitudes moved materially, so initialization still matters, but the candidate did not collapse or reverse. See `history/V25B_90D_STABILITY_RESULT.md`.
 
-Candidate B strategy parameters and the 90-day warm-up methodology are now frozen. No more timeframe, threshold, risk, exit, fee, slippage, leverage or warm-up tuning is permitted before final validation.
+Candidate B strategy parameters and the 90-day warm-up methodology were frozen after this gate.
 
-## Final untouched early-data validation
+## Final untouched early-data validation — COMPLETED
 
-Run:
+The frozen candidate was run exactly once on the remaining untouched early interval.
 
-`RUN_V25_FINAL_VALIDATION.bat`
+Protocol:
 
-The final runner derives its boundary from the original research protocol rather than from a hard-coded date:
+1. Reconstructed the earliest timestamp ever loaded by the original 14-window/60-day v2.5 research run.
+2. Ended evaluation exactly one minute before that research-history boundary.
+3. Used the earliest available BTC candles as a 90-day no-trade warm-up.
+4. Began evaluation immediately after that warm-up.
+5. Loaded no candle at or after the original research-history floor.
 
-1. Reconstruct the earliest timestamp ever loaded by the original 14-window/60-day v2.5 research run.
-2. End evaluation exactly one minute before that research-history boundary.
-3. Use the earliest available BTC candles as a 90-day no-trade warm-up.
-4. Begin evaluation immediately after that 90-day warm-up.
-5. Refuse any run that overlaps the original research-history boundary.
+Observed interval:
 
-With the current Binance CSV, this produces a shorter-than-180-day early validation interval because the dataset itself starts in August 2017. That is intentional; preserving untouched data is more important than forcing an arbitrary 180-day length.
+- warm-up start: 2017-08-17 04:00 UTC
+- evaluation start: 2017-11-15 04:00 UTC
+- evaluation end: 2018-03-22 11:01 UTC
+- original research floor: 2018-03-22 11:02 UTC
+- overlap with prior v2.5 research history: false
 
-Decision sequence:
+Result:
 
-1. Run the frozen final early-data validation exactly once.
-2. Record the result regardless of whether it is favorable.
-3. Do not retune against that interval afterward and relabel it as validation.
-4. After this run, no historical period in the current CSV remains untouched for v2.5B.
-5. Next, run a continuous chronological replay over the full available history to audit reset/warm-up artifacts.
-6. Then add perpetual-specific funding, maintenance margin/liquidation, execution realism and gap handling.
-7. Obtain genuinely fresh data (newer BTC history or exchange-specific perpetual history) for the next independent out-of-sample check.
-8. Only after those stages move to demo/PAPER validation. Real money remains out of scope until all validation layers are complete.
+- start equity: $1,000.00
+- end equity: $1,059.46
+- return: **+5.95%**
+- net PnL: **+$59.46**
+- 134 trades
+- 53.73% win rate
+- profit factor: **1.387**
+- max drawdown: **5.62%**
+- average R: **+0.177**
+- $7.17 modeled fees
+
+No numeric pass/fail threshold had been pre-registered for this gate, so the correct record is that the independent holdout produced a positive result under the frozen assumptions. See `history/V25B_FINAL_UNTOUCHED_VALIDATION_RESULT.md`.
+
+The early interval is now permanently consumed. No historical BTC period in the current CSV remains untouched for v2.5B.
+
+## Current gate — continuous chronological replay
+
+The next task is a single continuous stateful replay over the full available BTC history.
+
+Purpose:
+
+- audit whether the rolling independent-window methodology created reset/warm-up artifacts;
+- observe the candidate across changing market regimes without periodic state resets;
+- measure aggregate and chronological performance under the exact frozen v2.5B strategy settings.
+
+Protocol requirements:
+
+1. Keep all v2.5B strategy settings frozen.
+2. Use one 90-day no-trade warm-up at the beginning of the dataset.
+3. Replay all remaining candles continuously after warm-up.
+4. Do not reset TA, rolling-edge, drawdown or portfolio state between arbitrary windows.
+5. Preserve the same fee, slippage, risk, exit, leverage and portfolio-cap assumptions.
+6. Produce full-history aggregate metrics plus chronological period breakdowns.
+7. Treat this as a historical audit, **not** a blind validation run.
+8. Do not silently optimize v2.5B from this replay. A materially changed strategy becomes a new named candidate and requires genuinely fresh independent data.
+
+## After chronological replay
+
+1. Add perpetual-specific funding modeling.
+2. Add maintenance-margin and liquidation modeling.
+3. Improve execution realism and gap handling.
+4. Obtain genuinely fresh BTC history or exchange-specific perpetual history for the next independent out-of-sample check.
+5. Align demo/PAPER execution with the research assumptions and validate prospectively.
+6. Real-money deployment remains out of scope until all validation and execution layers are complete.
