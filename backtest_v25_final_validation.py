@@ -15,6 +15,55 @@ from backtest_oos_v242 import DAY_MS, MINUTE_MS, iso_ms, plan_windows
 from backtest_v25 import V25Backtester, V25_CONFIG
 
 
+class ReplayProgressRows:
+    """Read-only sequence wrapper that reports replay progress without changing bars."""
+
+    def __init__(self, rows, *, label: str = 'VALIDATION REPLAY', interval_s: float = 5.0):
+        self._rows = rows
+        self._label = label
+        self._interval_s = max(0.5, float(interval_s))
+
+    def __len__(self):
+        return len(self._rows)
+
+    def __getitem__(self, item):
+        return self._rows[item]
+
+    @staticmethod
+    def _fmt_seconds(seconds: float) -> str:
+        seconds = max(0, int(round(seconds)))
+        hours, rem = divmod(seconds, 3600)
+        minutes, secs = divmod(rem, 60)
+        if hours:
+            return f'{hours:02d}:{minutes:02d}:{secs:02d}'
+        return f'{minutes:02d}:{secs:02d}'
+
+    def __iter__(self):
+        total = len(self._rows)
+        started = time.perf_counter()
+        last_print = started
+        print(f'[{self._label}]   0.00% rows=0/{total:,} elapsed=00:00 ETA=calculating', flush=True)
+
+        for index, row in enumerate(self._rows, 1):
+            yield row
+            now = time.perf_counter()
+            if index != total and now - last_print < self._interval_s:
+                continue
+
+            elapsed = max(now - started, 1e-9)
+            rate = index / elapsed
+            eta = (total - index) / rate if rate > 0 else 0.0
+            pct = 100.0 * index / max(total, 1)
+            candle = iso_ms(int(row['t'])) if isinstance(row, dict) and 't' in row else '?'
+            print(
+                f'[{self._label}] {pct:6.2f}% rows={index:,}/{total:,} '
+                f'elapsed={self._fmt_seconds(elapsed)} ETA={self._fmt_seconds(eta)} '
+                f'candle={candle}',
+                flush=True,
+            )
+            last_print = now
+
+
 class FinalValidationBacktester(V25Backtester):
     """Frozen v2.5B with a no-trade warm-up before the validation interval."""
 
@@ -139,6 +188,9 @@ def main() -> int:
         fee_bps=a.fee_bps,
         slippage_bps=a.slippage_bps,
     )
+    # Wrap only after initialization so TA/resampling setup remains untouched.
+    # The wrapper changes console output only; bar order/content and strategy logic are identical.
+    bt.base = ReplayProgressRows(bt.base)
     report = bt.run()
     replay_seconds = time.perf_counter() - replay_started
 
