@@ -65,6 +65,7 @@ def _window_job(spec, base_slice, equity, fee_bps, slippage_bps,
         'oos_eval_end': spec['eval_end'],
         'oos_warmup_start': spec['warmup_start'],
         'v25_research_config': {
+            'candidate': 'v2.5B',
             'min_entry_timeframe_minutes': V25_CONFIG.min_entry_timeframe_minutes,
             'max_round_trip_cost_r': V25_CONFIG.max_round_trip_cost_r,
             'min_net_target_r': 1.50,
@@ -80,7 +81,8 @@ def _window_job(spec, base_slice, equity, fee_bps, slippage_bps,
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description='Terminal 3 v2.5 14-window research battery')
+    overall_started = time.perf_counter()
+    ap = argparse.ArgumentParser(description='Terminal 3 v2.5B 14-window research battery')
     ap.add_argument('csv')
     ap.add_argument('--windows', type=int, default=14)
     ap.add_argument('--window-days', type=int, default=180)
@@ -93,7 +95,7 @@ def main() -> int:
     ap.add_argument('--gross-cap-x', type=float, default=3.15)
     ap.add_argument('--portfolio-margin-pct', type=float, default=45.0)
     ap.add_argument('--workers', type=int, default=0)
-    ap.add_argument('--out', default='backtest_results_v25_research')
+    ap.add_argument('--out', default='backtest_results_v25_research_2h')
     a = ap.parse_args()
 
     if a.windows != 14:
@@ -114,25 +116,26 @@ def main() -> int:
         skip_recent_days=180, warmup_days=a.warmup_days,
     )
     # The next older 180-day interval is deliberately not planned or loaded.
-    # It remains reserved for one final v2.5 blind check if the research gate
-    # is strong enough to justify consuming it.
+    # It remains reserved for one final blind check if a candidate becomes
+    # materially stronger than breakeven on the inspected research corpus.
     earliest = min(int(s['warmup_start_ms']) for s in specs)
     latest = max(int(s['eval_end_ms']) for s in specs)
     workers = all_cpu_workers(a.workers)
 
     print('=' * 72)
-    print('Terminal 3 v2.5 RESEARCH BATTERY')
+    print('Terminal 3 v2.5B RESEARCH BATTERY')
     print('=' * 72)
-    print('Single strategy change: entries must be 1h or higher.')
+    print('Single strategy change vs candidate A: entries must be 2h or higher.')
     print('Everything else remains v2.4.2 Efficient.')
     print('Research corpus: 14 already-inspected 180-day windows.')
     print('The older reserved holdout is NOT loaded by this runner.')
     print(f'CPU workers available: {workers}/{os.cpu_count() or 1}')
     print()
 
-    t0 = time.perf_counter()
+    load_started = time.perf_counter()
     rows = load_1m_parallel(path, earliest, latest, workers, layout, show_progress=True)
-    print(f'Loaded {len(rows):,} shared 1m candles in {_fmt_seconds(time.perf_counter()-t0)}.')
+    load_seconds = time.perf_counter() - load_started
+    print(f'Loaded {len(rows):,} shared 1m candles in {_fmt_seconds(load_seconds)}.')
 
     jobs = []
     for spec in specs:
@@ -144,9 +147,9 @@ def main() -> int:
 
     replay_workers = min(len(jobs), workers)
     reports = []
-    started = time.perf_counter()
+    replay_started = time.perf_counter()
     ctx = mp.get_context('spawn')
-    print(f'\nRunning {len(jobs)} v2.5 windows with up to {replay_workers} concurrent processes...')
+    print(f'\nRunning {len(jobs)} v2.5B windows with up to {replay_workers} concurrent processes...')
     with ProcessPoolExecutor(max_workers=replay_workers, mp_context=ctx) as pool:
         futures = {
             pool.submit(
@@ -164,32 +167,48 @@ def main() -> int:
             if not done and now - last_print >= 1.0:
                 last_print = now
                 active = ','.join(f'{futures[f]:02d}' for f in sorted(pending, key=lambda x: futures[x]))
-                print('\r' + f'[V25] elapsed={_fmt_seconds(now-started)} active={active}'.ljust(120), end='', flush=True)
+                print('\r' + f'[V25B] elapsed={_fmt_seconds(now-replay_started)} active={active}'.ljust(120), end='', flush=True)
             for fut in done:
                 pending.remove(fut)
                 wid, report = fut.result()
                 reports.append(report)
                 print('\r' + (
-                    f'[V25] W{wid:02d} return={report.get("return_pct",0):+.2f}% '
+                    f'[V25B] W{wid:02d} return={report.get("return_pct",0):+.2f}% '
                     f'PF={report.get("profit_factor")} DD={report.get("max_drawdown_pct")}% '
-                    f'trades={report.get("trades")} elapsed={_fmt_seconds(time.perf_counter()-started)}'
+                    f'trades={report.get("trades")} elapsed={_fmt_seconds(time.perf_counter()-replay_started)}'
                 ).ljust(140), flush=True)
 
+    replay_seconds = time.perf_counter() - replay_started
     summary = summarize_reports(reports)
-    summary['candidate'] = 'Terminal 3 v2.5 hourly-entry research candidate'
+    # summarize_reports is shared with v2.4.2 and carries its baseline label;
+    # overwrite it so the saved summary cannot misidentify this candidate.
+    summary['strategy'] = {
+        'name': 'Terminal 3 v2.5B 2h-entry research candidate',
+        'min_entry_timeframe_minutes': V25_CONFIG.min_entry_timeframe_minutes,
+        'max_round_trip_cost_r': V25_CONFIG.max_round_trip_cost_r,
+        'min_net_target_r': 1.50,
+        'fee_bps_per_side': a.fee_bps,
+        'slippage_bps_per_side': a.slippage_bps,
+        'leverage': a.leverage,
+        'gross_cap_x': a.gross_cap_x,
+        'portfolio_margin_pct': a.portfolio_margin_pct,
+    }
+    summary['candidate'] = 'Terminal 3 v2.5B 2h-entry research candidate'
     summary['research_status'] = 'NOT BLIND VALIDATION'
     summary['reserved_holdout_consumed'] = False
-    summary['elapsed_seconds'] = round(time.perf_counter() - started, 3)
+    summary['load_seconds'] = round(load_seconds, 3)
+    summary['replay_elapsed_seconds'] = round(replay_seconds, 3)
+    summary['elapsed_seconds'] = round(time.perf_counter() - overall_started, 3)
 
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     for r in sorted(reports, key=lambda x: int(x['oos_window_id'])):
         core.save_report(r, out / f'window_{int(r["oos_window_id"]):02d}')
     stamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
-    (out / f'v25_research_summary_{stamp}.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+    (out / f'v25b_research_summary_{stamp}.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
 
     print('\n' + '=' * 72)
-    print('V2.5 RESEARCH BATTERY COMPLETE')
+    print('V2.5B RESEARCH BATTERY COMPLETE')
     print('=' * 72)
     print(json.dumps({k: v for k, v in summary.items() if k != 'windows'}, indent=2))
     print(f'\nResults folder: {out}')
