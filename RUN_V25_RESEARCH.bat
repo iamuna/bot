@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
-title Terminal 3 v2.5 Research Battery
+title Terminal 3 v2.5B Research Battery
 
 set "PY=.venv\Scripts\python.exe"
 if exist "%PY%" goto :deps
@@ -25,8 +25,8 @@ echo Installing/checking Python requirements...
 if errorlevel 1 goto :pip_fail
 
 echo.
-echo Terminal 3 v2.5 research battery
-echo Candidate: 1h+ entries, otherwise frozen v2.4.2 logic.
+echo Terminal 3 v2.5B research battery
+echo Candidate: 2h+ entries, otherwise frozen v2.4.2 logic.
 echo The final older holdout is reserved and will NOT be touched by this run.
 echo.
 
@@ -36,7 +36,7 @@ if "%~1"=="" (
   set "DATA=%~1"
 )
 
-"%PY%" -u backtest_v25_research.py "%DATA%" --workers 0 --out backtest_results_v25_research
+"%PY%" -u backtest_v25_research.py "%DATA%" --workers 0 --out backtest_results_v25_research_2h
 set "RC=%ERRORLEVEL%"
 goto :finish
 
@@ -56,9 +56,9 @@ set "RC=1"
 
 :finish
 echo.
-if "%RC%"=="0" echo v2.5 research battery finished successfully.
-if not "%RC%"=="0" echo v2.5 research battery stopped with error code %RC%.
-echo Results folder: backtest_results_v25_research
+if "%RC%"=="0" echo v2.5B research battery finished successfully.
+if not "%RC%"=="0" echo v2.5B research battery stopped with error code %RC%.
+echo Results folder: backtest_results_v25_research_2h
 echo.
 pause
 exit /b %RC%
