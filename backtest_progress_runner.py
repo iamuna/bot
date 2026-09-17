@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import multiprocessing as mp
+import os
 import time
+from collections import deque
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from pathlib import Path
 
 import backtest_v24 as core
@@ -14,6 +19,12 @@ import portfolio_cap
 # guarded engines before either backtester is constructed.
 portfolio_cap.install()
 
+# Only these TA fields are consumed by the historical strategy loop. Keeping a
+# compact tuple cache avoids retaining hundreds of thousands of large analysis
+# dictionaries while allowing the expensive TA calculations to be shared by
+# BASE and GUARDED.
+_ANALYSIS_FIELDS = ('score', 'coverage', 'quality', 'regime', 'extension_atr', 'atr')
+
 
 def _fmt_seconds(seconds: float | None) -> str:
     if seconds is None or seconds < 0 or seconds == float('inf'):
@@ -24,6 +35,20 @@ def _fmt_seconds(seconds: float | None) -> str:
     if h:
         return f'{h:d}:{m:02d}:{s:02d}'
     return f'{m:02d}:{s:02d}'
+
+
+def _auto_workers(requested: int = 0) -> int:
+    """Choose CPU workers conservatively for a desktop backtest.
+
+    CPython's TA loop is CPU-bound, so processes are used rather than threads.
+    Half the reported logical CPUs is a good default for SMT machines: on the
+    user's 8-core / 16-thread PC this selects 8 worker processes and targets the
+    physical cores without intentionally oversubscribing them.
+    """
+    logical = max(1, int(os.cpu_count() or 1))
+    if requested and requested > 0:
+        return max(1, min(int(requested), logical))
+    return max(1, min(8, logical // 2 if logical >= 4 else logical))
 
 
 def build_dataset_with_progress(base, show_progress: bool = True):
@@ -42,6 +67,140 @@ def build_dataset_with_progress(base, show_progress: bool = True):
     if show_progress:
         print()
     return data
+
+
+def _pack_analysis(a: dict):
+    return tuple(a.get(k) for k in _ANALYSIS_FIELDS)
+
+
+def _unpack_analysis(values):
+    return dict(zip(_ANALYSIS_FIELDS, values))
+
+
+def _analysis_chunk(tf: str, start_i: int, end_i: int, slice_start: int, bars_slice):
+    """CPU worker: precompute one contiguous TA chunk exactly as live replay does."""
+    results = []
+    for global_i in range(start_i, end_i):
+        local_i = global_i - slice_start
+        if local_i < 0 or local_i >= len(bars_slice):
+            continue
+        b = bars_slice[local_i]
+        if not b.get('closed'):
+            continue
+        window_start_global = max(0, global_i - core.ANALYSIS_WINDOW + 1)
+        local_start = window_start_global - slice_start
+        window = bars_slice[local_start:local_i + 1]
+        if len(window) < 30:
+            continue
+        try:
+            confirmed = analyze_latest(window, 'Aggressive')['confirmed']
+        except Exception:
+            continue
+        results.append((global_i, _pack_analysis(confirmed)))
+    return tf, start_i, end_i, results
+
+
+def build_analysis_cache_parallel(data, workers: int = 0, show_progress: bool = True):
+    """Precompute expensive TA once using multiple CPU processes.
+
+    BASE and GUARDED use identical historical TA inputs, so recomputing every
+    indicator twice in the sequential replay wastes most of the CPU time. This
+    stage splits each timeframe into bounded overlapping chunks, computes them
+    across worker processes, and stores only the six fields the strategy uses.
+    The later portfolio simulations therefore stay deterministic while becoming
+    much lighter.
+    """
+    workers = _auto_workers(workers)
+    cache = {tf: [None] * len(data[tf]) for tf in core.TF_ORDER}
+    total_points = sum(max(0, len(data[tf]) - 29) for tf in core.TF_ORDER)
+    if total_points <= 0:
+        return cache
+
+    # Aim for several tasks per worker so the 1m timeframe cannot monopolize a
+    # single process, while keeping IPC/pickling overhead bounded on Windows.
+    chunk_size = max(2000, min(12000, int(math.ceil(total_points / max(workers * 8, 1)))))
+    descriptors = deque()
+    for tf in core.TF_ORDER:
+        n = len(data[tf])
+        start = 29
+        while start < n:
+            end = min(n, start + chunk_size)
+            descriptors.append((tf, start, end))
+            start = end
+
+    started = time.perf_counter()
+    done_points = 0
+    successful = 0
+    last_print = 0.0
+
+    if show_progress:
+        logical = int(os.cpu_count() or 1)
+        print(
+            f'Precomputing technical analysis with {workers} CPU workers '
+            f'({logical} logical CPUs detected; chunk={chunk_size:,})...',
+            flush=True,
+        )
+
+    def emit(force: bool = False):
+        nonlocal last_print
+        if not show_progress:
+            return
+        now = time.perf_counter()
+        if not force and now - last_print < 0.75:
+            return
+        last_print = now
+        elapsed = max(now - started, 1e-9)
+        rate = done_points / elapsed
+        eta = (total_points - done_points) / rate if rate > 0 else None
+        pct = 100.0 * done_points / total_points
+        msg = (
+            f'[TA PRECOMPUTE] {pct:6.2f}%  {done_points:,}/{total_points:,} points  '
+            f'{rate:,.0f}/s  elapsed={_fmt_seconds(elapsed)}  ETA={_fmt_seconds(eta)}  '
+            f'workers={workers}  cached={successful:,}'
+        )
+        print('\r' + msg.ljust(170), end='', flush=True)
+
+    # Spawn is explicit so CI and Windows exercise the same process semantics.
+    ctx = mp.get_context('spawn')
+    max_in_flight = max(workers * 2, 1)
+    pending = {}
+
+    def submit_one(pool):
+        if not descriptors:
+            return False
+        tf, start_i, end_i = descriptors.popleft()
+        slice_start = max(0, start_i - core.ANALYSIS_WINDOW + 1)
+        # Only send the bars needed by this chunk plus its warm-up overlap.
+        bars_slice = data[tf][slice_start:end_i]
+        fut = pool.submit(_analysis_chunk, tf, start_i, end_i, slice_start, bars_slice)
+        pending[fut] = (tf, start_i, end_i)
+        return True
+
+    emit(force=True)
+    with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
+        while len(pending) < max_in_flight and submit_one(pool):
+            pass
+
+        while pending:
+            completed, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+            for fut in completed:
+                _tf, _start, _end = pending.pop(fut)
+                tf, start_i, end_i, rows = fut.result()
+                for i, packed in rows:
+                    cache[tf][i] = packed
+                successful += len(rows)
+                done_points += end_i - start_i
+                emit()
+                submit_one(pool)
+
+    emit(force=True)
+    if show_progress:
+        print()
+        print(
+            f'TA cache ready: {successful:,} historical analyses computed once and shared by BASE + GUARDED.',
+            flush=True,
+        )
+    return cache
 
 
 def _construct_with_shared_data(cls, base, shared_data, equity, fee_bps, slippage_bps):
@@ -95,7 +254,13 @@ def _finalize_report(bt, bankruptcy: dict | None, processed: int, total: int) ->
     return r
 
 
-def run_with_progress(bt, label: str, show_progress: bool = True, refresh_seconds: float = 1.0):
+def run_with_progress(
+    bt,
+    label: str,
+    show_progress: bool = True,
+    refresh_seconds: float = 1.0,
+    analysis_cache=None,
+):
     total = len(bt.base)
     started = time.perf_counter()
     last_print = 0.0
@@ -138,6 +303,8 @@ def run_with_progress(bt, label: str, show_progress: bool = True, refresh_second
             f'effective gross cap={portfolio_cap.effective_gross_cap_x():.2f}x.',
             flush=True,
         )
+        if analysis_cache is not None:
+            print('Using shared precomputed TA cache; indicator calculations are not repeated in this replay.', flush=True)
         print('Liquidation mechanics are not modeled; MTM equity <= $0 stops the simulation as BANKRUPT.', flush=True)
     emit(0, force=True)
 
@@ -191,13 +358,20 @@ def run_with_progress(bt, label: str, show_progress: bool = True, refresh_second
             if not b.get('closed'):
                 continue
             bt.cur_indices[tf] = i
-            start = max(0, i - core.ANALYSIS_WINDOW + 1)
-            window = bars_all[start:i + 1]
-            if len(window) >= 30:
-                try:
-                    bt.analyses[tf] = analyze_latest(window, 'Aggressive')['confirmed']
-                except Exception:
-                    pass
+
+            if analysis_cache is not None:
+                packed = analysis_cache[tf][i] if i < len(analysis_cache[tf]) else None
+                if packed is not None:
+                    bt.analyses[tf] = _unpack_analysis(packed)
+            else:
+                start = max(0, i - core.ANALYSIS_WINDOW + 1)
+                window = bars_all[start:i + 1]
+                if len(window) >= 30:
+                    try:
+                        bt.analyses[tf] = analyze_latest(window, 'Aggressive')['confirmed']
+                    except Exception:
+                        pass
+
             c = bt._candidate(tf, i)
             if c:
                 fresh.append(c)
@@ -262,6 +436,7 @@ def main():
     ap.add_argument('--leverage', type=float, default=30.0, help='research leverage setting; capped at 30x by this runner')
     ap.add_argument('--gross-cap-x', type=float, default=3.15, help='account-wide gross notional cap as multiple of MTM equity')
     ap.add_argument('--portfolio-margin-pct', type=float, default=45.0, help='account-wide initial-margin budget as percent of MTM equity')
+    ap.add_argument('--workers', type=int, default=0, help='TA worker processes; 0=auto (8 on a 16-thread CPU)')
     a = ap.parse_args()
 
     if not (1.0 <= a.leverage <= 30.0):
@@ -270,6 +445,8 @@ def main():
         ap.error('--gross-cap-x must be between 0.1x and 10x')
     if not (1.0 <= a.portfolio_margin_pct <= 100.0):
         ap.error('--portfolio-margin-pct must be between 1 and 100')
+    if a.workers < 0:
+        ap.error('--workers must be 0 (auto) or a positive integer')
 
     # Leverage is now an explicit test parameter instead of a hard-coded 7x
     # assumption. Gross exposure stays separately capped, so moving to 30x
@@ -277,6 +454,7 @@ def main():
     core.LEVERAGE = float(a.leverage)
     portfolio_cap.PORTFOLIO_GROSS_NOTIONAL_X = float(a.gross_cap_x)
     portfolio_cap.PORTFOLIO_MARGIN_USE_PCT = float(a.portfolio_margin_pct)
+    workers = _auto_workers(a.workers)
 
     path = Path(a.csv)
     print('Scanning data range...', flush=True)
@@ -296,13 +474,15 @@ def main():
         f'effective cap={portfolio_cap.effective_gross_cap_x():.2f}x equity.',
         flush=True,
     )
+    print(f'CPU mode: {workers} TA worker processes.', flush=True)
 
     shared_data = build_dataset_with_progress(base, show_progress=True)
+    analysis_cache = build_analysis_cache_parallel(shared_data, workers=workers, show_progress=True)
     out = Path(a.out)
 
     if a.mode in {'base', 'compare'}:
         base_bt = _construct_with_shared_data(core.Backtester, base, shared_data, a.equity, a.fee_bps, a.slippage_bps)
-        base_report = run_with_progress(base_bt, 'BASE v2.4')
+        base_report = run_with_progress(base_bt, 'BASE v2.4', analysis_cache=analysis_cache)
         j, c = core.save_report(base_report, out / 'base')
         print('BASE result:')
         print(json.dumps(_summary(base_report), indent=2))
@@ -310,7 +490,7 @@ def main():
 
     if a.mode in {'guarded', 'compare'}:
         guard_bt = _construct_with_shared_data(GuardedBacktester, base, shared_data, a.equity, a.fee_bps, a.slippage_bps)
-        guard_report = run_with_progress(guard_bt, 'GUARDED v2.4')
+        guard_report = run_with_progress(guard_bt, 'GUARDED v2.4', analysis_cache=analysis_cache)
         j, c = core.save_report(guard_report, out / 'guarded')
         print('GUARDED result:')
         print(json.dumps(_summary(guard_report), indent=2))
@@ -318,4 +498,5 @@ def main():
 
 
 if __name__ == '__main__':
+    mp.freeze_support()
     main()
